@@ -12,55 +12,54 @@ jobs:
   build-release:
     name: Build & Release
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target:
-          - x86_64-linux
-          - aarch64-linux
-          - x86_64-macos
-          - aarch64-macos
-          - x86_64-windows
-          - aarch64-windows
-
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
 
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+        uses: mlugg/setup-zig@v1
         with:
           zig-version: 0.13.0
 
-      - name: Build Binary
-        run: |
-          zig build -Doptimize=ReleaseSmall -Dtarget=${{ matrix.target }}
-
-      - name: Package Release Asset
+      - name: Build and Package Release Assets
         shell: bash
         run: |
           VERSION="${{ github.ref_name }}"
-          TARGET="${{ matrix.target }}"
+          TARGETS=(
+            "x86_64-linux"
+            "aarch64-linux"
+            "x86_64-macos"
+            "aarch64-macos"
+            "x86_64-windows"
+            "aarch64-windows"
+          )
           
-          # Detect binary name (Windows uses .exe)
-          if [[ "$TARGET" == *"windows"* ]]; then
-            BIN_NAME="zzh.exe"
-            ASSET_NAME="zzh-${VERSION}-${TARGET}.zip"
-            cd zig-out/bin
-            zip -r "../../${ASSET_NAME}" "${BIN_NAME}"
-            cd ../..
-          else
-            BIN_NAME="zzh"
-            ASSET_NAME="zzh-${VERSION}-${TARGET}.tar.gz"
-            cd zig-out/bin
-            tar -czf "../../${ASSET_NAME}" "${BIN_NAME}"
-            cd ../..
-          fi
-          
-          echo "ASSET_PATH=${ASSET_NAME}" >> $GITHUB_ENV
+          for TARGET in "${TARGETS[@]}"; do
+            echo "Building for $TARGET..."
+            zig build -Doptimize=ReleaseSmall -Dtarget="$TARGET"
+            
+            if [[ "$TARGET" == *"windows"* ]]; then
+              BIN_NAME="zzh.exe"
+              ASSET_NAME="zzh-${VERSION}-${TARGET}.zip"
+              cd zig-out/bin
+              zip -r "../../${ASSET_NAME}" "${BIN_NAME}"
+              cd ../..
+            else
+              BIN_NAME="zzh"
+              ASSET_NAME="zzh-${VERSION}-${TARGET}.tar.gz"
+              cd zig-out/bin
+              tar -czf "../../${ASSET_NAME}" "${BIN_NAME}"
+              cd ../..
+            fi
+            
+            rm -rf zig-out
+          done
 
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.ASSET_PATH }}
+          files: |
+            zzh-${{ github.ref_name }}-*.tar.gz
+            zzh-${{ github.ref_name }}-*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
