@@ -3,7 +3,10 @@ const std = @import("std");
 pub fn getHomeDir(allocator: std.mem.Allocator) ?[]const u8 {
     var env_map = std.process.getEnvMap(allocator) catch return null;
     defer env_map.deinit();
+    return getHomeDirFromMap(allocator, &env_map);
+}
 
+pub noinline fn getHomeDirFromMap(allocator: std.mem.Allocator, env_map: *const std.process.EnvMap) ?[]const u8 {
     if (env_map.get("USERPROFILE")) |val| {
         return allocator.dupe(u8, val) catch null;
     }
@@ -98,7 +101,7 @@ fn trimQuotes(val: []const u8) []const u8 {
     return v;
 }
 
-pub fn parseConfig(allocator: std.mem.Allocator, file_path: []const u8, host: []const u8, args_list: *std.ArrayList([]const u8)) !void {
+pub noinline fn parseConfig(allocator: std.mem.Allocator, file_path: []const u8, host: []const u8, args_list: *std.ArrayList([]const u8)) !void {
     const file = std.fs.openFileAbsolute(file_path, .{}) catch |err| {
         if (err == error.FileNotFound) return;
         return err;
@@ -267,4 +270,119 @@ test "Config Parsing Test" {
     try testing.expectEqualStrings("+if", args_list.items[6]);
     try testing.expectEqualStrings("+e", args_list.items[7]);
     try testing.expectEqualStrings("OSH_THEME=\"simple\"", args_list.items[8]);
+}
+
+test "Config Parsing Test - Extra cases and environments" {
+    const testing = std.testing;
+
+    // 1. Test getHomeDir environment branches
+    var env_map = std.process.EnvMap.init(testing.allocator);
+    defer env_map.deinit();
+
+    // A. Test USERPROFILE branch
+    try env_map.put("USERPROFILE", "mock_userprofile");
+    const h_up = getHomeDirFromMap(testing.allocator, &env_map).?;
+    try testing.expectEqualStrings("mock_userprofile", h_up);
+    testing.allocator.free(h_up);
+
+    // B. Test HOME branch (with USERPROFILE still there, USERPROFILE takes precedence)
+    try env_map.put("HOME", "mock_home");
+    const h_up2 = getHomeDirFromMap(testing.allocator, &env_map).?;
+    try testing.expectEqualStrings("mock_userprofile", h_up2);
+    testing.allocator.free(h_up2);
+
+    // Now remove USERPROFILE to test HOME branch
+    _ = env_map.remove("USERPROFILE");
+    const h_home = getHomeDirFromMap(testing.allocator, &env_map).?;
+    try testing.expectEqualStrings("mock_home", h_home);
+    testing.allocator.free(h_home);
+
+    // C. Test HOMEDRIVE and HOMEPATH branch
+    _ = env_map.remove("HOME");
+    try env_map.put("HOMEDRIVE", "C:");
+    try env_map.put("HOMEPATH", "\\Users\\mock");
+    const h_drive = getHomeDirFromMap(testing.allocator, &env_map).?;
+    try testing.expectEqualStrings("C:\\Users\\mock", h_drive);
+    testing.allocator.free(h_drive);
+
+    // D. Test null fallback
+    _ = env_map.remove("HOMEDRIVE");
+    _ = env_map.remove("HOMEPATH");
+    const home_null = getHomeDirFromMap(testing.allocator, &env_map);
+    try testing.expect(home_null == null);
+
+    // Call getHomeDir just to ensure the main wrapper gets covered.
+    if (getHomeDir(testing.allocator)) |h| {
+        testing.allocator.free(h);
+    }
+
+    // 2. Test glob matching with wildcards in the middle/start
+    try testing.expect(matchPattern(testing.allocator, "*host", "myhost"));
+    try testing.expect(matchPattern(testing.allocator, "prod*01", "prod-server-01"));
+    try testing.expect(!matchPattern(testing.allocator, "prod*01", "dev-server-01"));
+
+    // 3. Test failing allocator error path (OOM)
+    try testing.expect(!matchPattern(testing.failing_allocator, "a*", "a"));
+
+    // 4. Test non-existent config file (FileNotFound fallback)
+    var err_args = std.ArrayList([]const u8).init(testing.allocator);
+    defer err_args.deinit();
+    try parseConfig(testing.allocator, "/non/existent/file/path.zzhc", "myhost", &err_args);
+    try testing.expect(err_args.items.len == 0);
+
+    // 5. Test config with \r\n, tab indents, comments, empty lines, and trailing boolean flag
+    // We add a non-hosts root key to cover line 162 (in_hosts = false)
+    const config_content =
+        "other:\n" ++
+        "  key: val\n" ++
+        "hosts:\n" ++
+        "  \".*\":\n" ++
+        "    +s: xonsh\n" ++
+        "\t# comment with tab\n" ++
+        "\n" ++
+        "    +hhh: \"~\"\n" ++
+        "  \"myhost\":\n" ++
+        "    -p: 2222\n" ++
+        "    +if:\r\n";
+
+    var tmp_dir = testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+    try tmp_dir.dir.writeFile(.{ .sub_path = "config.zzhc", .data = config_content });
+    var path_buf: [1024]u8 = undefined;
+    const absolute_path = try tmp_dir.dir.realpath("config.zzhc", &path_buf);
+
+    var args_list = std.ArrayList([]const u8).init(testing.allocator);
+    defer {
+        for (args_list.items) |arg| testing.allocator.free(arg);
+        args_list.deinit();
+    }
+    try parseConfig(testing.allocator, absolute_path, "myhost", &args_list);
+    try testing.expect(args_list.items.len == 7);
+    try testing.expectEqualStrings("+s", args_list.items[0]);
+    try testing.expectEqualStrings("xonsh", args_list.items[1]);
+    try testing.expectEqualStrings("+hhh", args_list.items[2]);
+    try testing.expectEqualStrings("~", args_list.items[3]);
+    try testing.expectEqualStrings("-p", args_list.items[4]);
+    try testing.expectEqualStrings("2222", args_list.items[5]);
+    try testing.expectEqualStrings("+if", args_list.items[6]);
+
+    // 6. Test StreamTooLong error to trigger defer cleanup of current_key
+    var long_line_buf: [5000]u8 = undefined;
+    @memset(&long_line_buf, 'a');
+    const long_config =
+        "hosts:\n" ++
+        "  \".*\":\n" ++
+        "    +if:\n" ++ // sets current_key
+        long_line_buf[0..] ++ "\n";
+
+    var tmp_dir2 = testing.tmpDir(.{});
+    defer tmp_dir2.cleanup();
+    try tmp_dir2.dir.writeFile(.{ .sub_path = "long_config.zzhc", .data = long_config });
+    var path_buf2: [1024]u8 = undefined;
+    const absolute_path2 = try tmp_dir2.dir.realpath("long_config.zzhc", &path_buf2);
+
+    var args_list2 = std.ArrayList([]const u8).init(testing.allocator);
+    defer args_list2.deinit();
+    const long_res = parseConfig(testing.allocator, absolute_path2, "myhost", &args_list2);
+    try testing.expectError(error.StreamTooLong, long_res);
 }

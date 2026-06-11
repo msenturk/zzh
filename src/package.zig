@@ -13,19 +13,37 @@ pub fn freeResolvedPackage(allocator: std.mem.Allocator, pkg: ResolvedPackage) v
     allocator.free(pkg.clean_name);
 }
 
-pub fn resolvePackageName(allocator: std.mem.Allocator, name: []const u8, is_shell: bool) ![]const u8 {
+pub noinline fn resolvePackageName(allocator: std.mem.Allocator, name: []const u8, is_shell: bool) ![]const u8 {
     if (is_shell) {
-        if (!std.mem.startsWith(u8, name, "xxh-shell-")) {
-            if (std.mem.indexOf(u8, name, "+git+")) |idx| {
-                const shell_short = name[0..idx];
-                const rest = name[idx..];
-                if (!std.mem.startsWith(u8, shell_short, "xxh-shell-")) {
-                    return std.fmt.allocPrint(allocator, "xxh-shell-{s}{s}", .{ shell_short, rest });
+        var mapped_name = name;
+        if (std.mem.eql(u8, name, "nushell")) {
+            mapped_name = "nu";
+        } else if (std.mem.eql(u8, name, "xxh-shell-nushell")) {
+            mapped_name = "xxh-shell-nu";
+        } else if (std.mem.startsWith(u8, name, "nushell+git+")) {
+            const rest = name["nushell".len..];
+            return std.fmt.allocPrint(allocator, "xxh-shell-nu{s}", .{rest});
+        } else if (std.mem.startsWith(u8, name, "xxh-shell-nushell+git+")) {
+            const rest = name["xxh-shell-nushell".len..];
+            return std.fmt.allocPrint(allocator, "xxh-shell-nu{s}", .{rest});
+        }
+
+        if (!std.mem.startsWith(u8, mapped_name, "xxh-shell-")) {
+            if (std.mem.indexOf(u8, mapped_name, "+git+")) |idx| {
+                const shell_short = mapped_name[0..idx];
+                const rest = mapped_name[idx..];
+                var clean_short = shell_short;
+                if (std.mem.eql(u8, clean_short, "nushell")) {
+                    clean_short = "nu";
+                }
+                if (!std.mem.startsWith(u8, clean_short, "xxh-shell-")) {
+                    return std.fmt.allocPrint(allocator, "xxh-shell-{s}{s}", .{ clean_short, rest });
                 }
             } else {
-                return std.fmt.allocPrint(allocator, "xxh-shell-{s}", .{name});
+                return std.fmt.allocPrint(allocator, "xxh-shell-{s}", .{mapped_name});
             }
         }
+        return allocator.dupe(u8, mapped_name);
     } else {
         if (!std.mem.startsWith(u8, name, "xxh-plugin-")) {
             if (std.mem.indexOf(u8, name, "+git+")) |idx| {
@@ -42,7 +60,7 @@ pub fn resolvePackageName(allocator: std.mem.Allocator, name: []const u8, is_she
     return allocator.dupe(u8, name);
 }
 
-pub fn resolvePackage(allocator: std.mem.Allocator, raw_name: []const u8, is_shell: bool) !ResolvedPackage {
+pub noinline fn resolvePackage(allocator: std.mem.Allocator, raw_name: []const u8, is_shell: bool) !ResolvedPackage {
     const resolved_name = try resolvePackageName(allocator, raw_name, is_shell);
     errdefer allocator.free(resolved_name);
 
@@ -98,6 +116,50 @@ pub fn runCommand(allocator: std.mem.Allocator, argv: []const []const u8) !void 
     }
 }
 
+fn downloadOfficialNuPlugin(allocator: std.mem.Allocator, plugin_name: []const u8, target_dir: []const u8) !void {
+    const NU_VERSION = "0.94.2";
+    const tarball_name = "nu_plugin_download.tar.gz";
+
+    const temp_tarball = try std.fs.path.join(allocator, &.{ target_dir, tarball_name });
+    defer allocator.free(temp_tarball);
+
+    // Create target directory first
+    try makeDirRecursive(allocator, target_dir);
+
+    // 1. Download Nushell tarball using curl
+    const download_url = try std.fmt.allocPrint(allocator, "https://github.com/nushell/nushell/releases/download/{s}/nu-{s}-x86_64-unknown-linux-musl.tar.gz", .{ NU_VERSION, NU_VERSION });
+    defer allocator.free(download_url);
+
+    const curl_argv = [_][]const u8{ "curl", "-L", "-o", temp_tarball, download_url };
+    try runCommand(allocator, &curl_argv);
+
+    // 2. Extract using tar
+    const tar_argv = [_][]const u8{ "tar", "-xzf", temp_tarball, "-C", target_dir };
+    try runCommand(allocator, &tar_argv);
+
+    // 3. Move the plugin binary to the root of target_dir
+    const extracted_folder_name = try std.fmt.allocPrint(allocator, "nu-{s}-x86_64-unknown-linux-musl", .{NU_VERSION});
+    defer allocator.free(extracted_folder_name);
+
+    const bin_filename = try std.fmt.allocPrint(allocator, "nu_plugin_{s}", .{plugin_name});
+    defer allocator.free(bin_filename);
+
+    const src_path = try std.fs.path.join(allocator, &.{ target_dir, extracted_folder_name, bin_filename });
+    defer allocator.free(src_path);
+
+    const dest_path = try std.fs.path.join(allocator, &.{ target_dir, bin_filename });
+    defer allocator.free(dest_path);
+
+    // Rename (move) file
+    try std.fs.renameAbsolute(src_path, dest_path);
+
+    // 4. Clean up the extracted directory and temporary tarball
+    const extracted_dir_path = try std.fs.path.join(allocator, &.{ target_dir, extracted_folder_name });
+    defer allocator.free(extracted_dir_path);
+    try std.fs.deleteTreeAbsolute(extracted_dir_path);
+    try std.fs.deleteFileAbsolute(temp_tarball);
+}
+
 pub fn downloadAndCachePackage(allocator: std.mem.Allocator, pkg: ResolvedPackage, is_shell: bool, install_force: bool, local_xxh_home: ?[]const u8) ![]const u8 {
     var base_dir: []const u8 = undefined;
     if (local_xxh_home) |lh| {
@@ -132,10 +194,16 @@ pub fn downloadAndCachePackage(allocator: std.mem.Allocator, pkg: ResolvedPackag
         defer allocator.free(parent_dir);
         try makeDirRecursive(allocator, parent_dir);
 
-        // Run git clone --depth=1 <git_url> <target_dir>
-        std.debug.print("Downloading {s} from {s}...\n", .{ pkg.clean_name, pkg.git_url });
-        const argv = [_][]const u8{ "git", "clone", "--depth=1", pkg.git_url, target_dir };
-        try runCommand(allocator, &argv);
+        if (!is_shell and std.mem.startsWith(u8, pkg.clean_name, "xxh-plugin-nu-")) {
+            const plugin_suffix = pkg.clean_name["xxh-plugin-nu-".len..];
+            std.debug.print("Downloading official Nushell plugin '{s}' from Nushell releases...\n", .{plugin_suffix});
+            try downloadOfficialNuPlugin(allocator, plugin_suffix, target_dir);
+        } else {
+            // Run git clone --depth=1 <git_url> <target_dir>
+            std.debug.print("Downloading {s} from {s}...\n", .{ pkg.clean_name, pkg.git_url });
+            const argv = [_][]const u8{ "git", "clone", "--depth=1", pkg.git_url, target_dir };
+            try runCommand(allocator, &argv);
+        }
     }
 
     return target_dir;
@@ -144,13 +212,130 @@ pub fn downloadAndCachePackage(allocator: std.mem.Allocator, pkg: ResolvedPackag
 test "resolvePackage Test" {
     const testing = std.testing;
 
+    // Direct tests for resolvePackageName branches (uncovered lines 23 and 35)
+    const s1 = try resolvePackageName(testing.allocator, "zsh+git+https://github.com/user/zsh", true);
+    defer testing.allocator.free(s1);
+    try testing.expectEqualStrings("xxh-shell-zsh+git+https://github.com/user/zsh", s1);
+
+    const s2 = try resolvePackageName(testing.allocator, "myplugin+git+https://github.com/user/myplugin", false);
+    defer testing.allocator.free(s2);
+    try testing.expectEqualStrings("xxh-plugin-myplugin+git+https://github.com/user/myplugin", s2);
+
+    // OOM path test to cover errdefer allocator.free(resolved_name)
+    _ = resolvePackage(testing.failing_allocator, "zsh", true) catch |err| {
+        try testing.expect(err == error.OutOfMemory);
+    };
+
+    // Failable allocator to cover errdefer allocator.free(resolved_name) when subsequent allocation fails
+    var failable = FailableAllocator.init(testing.allocator, 1);
+    const failable_allocator = failable.getAllocator();
+    _ = resolvePackage(failable_allocator, "zsh", true) catch |err| {
+        try testing.expect(err == error.OutOfMemory);
+    };
+
+    // Case 1: Short shell name (adds prefix, default url)
     const p1 = try resolvePackage(testing.allocator, "zsh", true);
     defer freeResolvedPackage(testing.allocator, p1);
     try testing.expectEqualStrings("xxh-shell-zsh", p1.clean_name);
     try testing.expectEqualStrings("https://github.com/xxh/xxh-shell-zsh", p1.git_url);
 
+    // Case 2: Short plugin name with +git+ url (adds prefix, clean name from +git+)
     const p2 = try resolvePackage(testing.allocator, "myplugin+git+https://github.com/user/myplugin", false);
     defer freeResolvedPackage(testing.allocator, p2);
     try testing.expectEqualStrings("xxh-plugin-myplugin", p2.clean_name);
     try testing.expectEqualStrings("https://github.com/user/myplugin", p2.git_url);
+
+    // Case 3: Shell name already has prefix (no-op prefix, default url)
+    const p3 = try resolvePackage(testing.allocator, "xxh-shell-zsh", true);
+    defer freeResolvedPackage(testing.allocator, p3);
+    try testing.expectEqualStrings("xxh-shell-zsh", p3.clean_name);
+
+    // Case 4: Shell name with short form +git+ url (adds prefix, clean name from +git+)
+    const p4 = try resolvePackage(testing.allocator, "zsh+git+https://github.com/user/zsh", true);
+    defer freeResolvedPackage(testing.allocator, p4);
+    try testing.expectEqualStrings("xxh-shell-zsh", p4.clean_name);
+    try testing.expectEqualStrings("https://github.com/user/zsh", p4.git_url);
+
+    // Case 5: Shell name with prefix +git+ url (no-op prefix, clean name from +git+)
+    const p5 = try resolvePackage(testing.allocator, "xxh-shell-zsh+git+https://github.com/user/zsh", true);
+    defer freeResolvedPackage(testing.allocator, p5);
+    try testing.expectEqualStrings("xxh-shell-zsh", p5.clean_name);
+
+    // Case 6: Plugin name without prefix (adds prefix, default url)
+    const p6 = try resolvePackage(testing.allocator, "myplugin", false);
+    defer freeResolvedPackage(testing.allocator, p6);
+    try testing.expectEqualStrings("xxh-plugin-myplugin", p6.clean_name);
+    try testing.expectEqualStrings("https://github.com/xxh/xxh-plugin-myplugin", p6.git_url);
+
+    // Case 7: Plugin name with prefix +git+ url (no-op prefix, clean name from +git+)
+    const p7 = try resolvePackage(testing.allocator, "xxh-plugin-myplugin+git+https://github.com/user/myplugin", false);
+    defer freeResolvedPackage(testing.allocator, p7);
+    try testing.expectEqualStrings("xxh-plugin-myplugin", p7.clean_name);
+
+    // Case 8: Nushell resolution tests
+    const nu1 = try resolvePackageName(testing.allocator, "nushell", true);
+    defer testing.allocator.free(nu1);
+    try testing.expectEqualStrings("xxh-shell-nu", nu1);
+
+    const nu2 = try resolvePackageName(testing.allocator, "nushell+git+https://github.com/msenturk/xxh-shell-nu", true);
+    defer testing.allocator.free(nu2);
+    try testing.expectEqualStrings("xxh-shell-nu+git+https://github.com/msenturk/xxh-shell-nu", nu2);
+
+    const nu3 = try resolvePackageName(testing.allocator, "xxh-shell-nushell", true);
+    defer testing.allocator.free(nu3);
+    try testing.expectEqualStrings("xxh-shell-nu", nu3);
+
+    const nu4 = try resolvePackageName(testing.allocator, "xxh-shell-nushell+git+https://github.com/msenturk/xxh-shell-nu", true);
+    defer testing.allocator.free(nu4);
+    try testing.expectEqualStrings("xxh-shell-nu+git+https://github.com/msenturk/xxh-shell-nu", nu4);
+
+    const nu5 = try resolvePackage(testing.allocator, "nushell", true);
+    defer freeResolvedPackage(testing.allocator, nu5);
+    try testing.expectEqualStrings("xxh-shell-nu", nu5.clean_name);
+    try testing.expectEqualStrings("https://github.com/xxh/xxh-shell-nu", nu5.git_url);
 }
+
+const FailableAllocator = struct {
+    allocator: std.mem.Allocator,
+    alloc_count: usize = 0,
+    fail_index: usize,
+
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator, fail_index: usize) Self {
+        return .{
+            .allocator = allocator,
+            .fail_index = fail_index,
+        };
+    }
+
+    pub fn getAllocator(self: *Self) std.mem.Allocator {
+        return .{
+            .ptr = self,
+            .vtable = &.{
+                .alloc = alloc,
+                .resize = resize,
+                .free = free,
+            },
+        };
+    }
+
+    fn alloc(ctx: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
+        const self: *Self = @alignCast(@ptrCast(ctx));
+        self.alloc_count += 1;
+        if (self.alloc_count > self.fail_index) {
+            return null;
+        }
+        return self.allocator.rawAlloc(len, ptr_align, ret_addr);
+    }
+
+    fn resize(ctx: *anyopaque, buf: []u8, buf_align: u8, new_len: usize, ret_addr: usize) bool {
+        const self: *Self = @alignCast(@ptrCast(ctx));
+        return self.allocator.rawResize(buf, buf_align, new_len, ret_addr);
+    }
+
+    fn free(ctx: *anyopaque, buf: []u8, buf_align: u8, ret_addr: usize) void {
+        const self: *Self = @alignCast(@ptrCast(ctx));
+        self.allocator.rawFree(buf, buf_align, ret_addr);
+    }
+};

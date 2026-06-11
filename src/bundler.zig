@@ -198,3 +198,86 @@ test "Payload Bundler Test" {
     defer testing.allocator.free(check_entrypoint);
     try testing.expect(dirExists(check_entrypoint));
 }
+
+test "Payload Bundler Test - with build subdirectories and build.sh" {
+    const testing = std.testing;
+
+    // Create a dummy shell directory with build/ directory already present
+    var tmp_shell_dir = testing.tmpDir(.{});
+    defer tmp_shell_dir.cleanup();
+    try tmp_shell_dir.dir.makeDir("build");
+    try tmp_shell_dir.dir.writeFile(.{ .sub_path = "build/entrypoint.sh", .data = "#!/bin/sh\necho shell" });
+
+    // Create a dummy plugin directory with build.sh
+    var tmp_plugin_dir = testing.tmpDir(.{});
+    defer tmp_plugin_dir.cleanup();
+    
+    // Create build.sh that exits 0
+    try tmp_plugin_dir.dir.writeFile(.{ .sub_path = "build.sh", .data = "#!/bin/sh\nmkdir -p build && echo 'echo plugin' > build/init.sh\n" });
+    
+    var shell_buf: [1024]u8 = undefined;
+    const shell_path = try tmp_shell_dir.dir.realpath(".", &shell_buf);
+
+    var plugin_buf: [1024]u8 = undefined;
+    const plugin_path = try tmp_plugin_dir.dir.realpath(".", &plugin_buf);
+
+    // Make build.sh executable on Linux/macOS
+    if (builtin.os.tag != .windows) {
+        var path_b: [1024]u8 = undefined;
+        const build_sh_real_path = try tmp_plugin_dir.dir.realpath("build.sh", &path_b);
+        const argv = [_][]const u8{ "chmod", "+x", build_sh_real_path };
+        try package.runCommand(testing.allocator, &argv);
+    }
+
+    const plugin_paths = [_][]const u8{plugin_path};
+
+    const result = try buildPayload(testing.allocator, shell_path, &plugin_paths);
+    defer cleanupBundle(testing.allocator, result);
+
+    try testing.expect(dirExists(result.temp_build_dir));
+    try testing.expect(dirExists(result.archive_path));
+
+    const shell_pkg_name = std.fs.path.basename(shell_path);
+    const check_entrypoint = try std.fmt.allocPrint(testing.allocator, "{s}/.zzh/shells/{s}/build/entrypoint.sh", .{ result.temp_build_dir, shell_pkg_name });
+    defer testing.allocator.free(check_entrypoint);
+    try testing.expect(dirExists(check_entrypoint));
+
+    const plugin_name = std.fs.path.basename(plugin_path);
+    const check_init = try std.fmt.allocPrint(testing.allocator, "{s}/.zzh/plugins/{s}/build/init.sh", .{ result.temp_build_dir, plugin_name });
+    defer testing.allocator.free(check_init);
+    try testing.expect(dirExists(check_init));
+}
+
+test "Payload Bundler Test - build script failure and errdefer" {
+    const testing = std.testing;
+
+
+    // Create a dummy shell directory
+    var tmp_shell_dir = testing.tmpDir(.{});
+    defer tmp_shell_dir.cleanup();
+    try tmp_shell_dir.dir.writeFile(.{ .sub_path = "entrypoint.sh", .data = "#!/bin/sh\necho shell" });
+
+    // Create a dummy plugin directory with a failing build.sh
+    var tmp_plugin_dir = testing.tmpDir(.{});
+    defer tmp_plugin_dir.cleanup();
+
+    try tmp_plugin_dir.dir.writeFile(.{ .sub_path = "build.sh", .data = "#!/bin/sh\nexit 1\n" });
+
+    if (builtin.os.tag != .windows) {
+        var path_b: [1024]u8 = undefined;
+        const build_sh_real_path = try tmp_plugin_dir.dir.realpath("build.sh", &path_b);
+        const argv = [_][]const u8{ "chmod", "+x", build_sh_real_path };
+        try package.runCommand(testing.allocator, &argv);
+    }
+
+    var shell_buf: [1024]u8 = undefined;
+    const shell_path = try tmp_shell_dir.dir.realpath(".", &shell_buf);
+
+    var plugin_buf: [1024]u8 = undefined;
+    const plugin_path = try tmp_plugin_dir.dir.realpath(".", &plugin_buf);
+
+    const plugin_paths = [_][]const u8{plugin_path};
+
+    const res = buildPayload(testing.allocator, shell_path, &plugin_paths);
+    try testing.expectError(error.BuildScriptFailed, res);
+}

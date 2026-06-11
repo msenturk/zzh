@@ -583,3 +583,26 @@ test "Destination Parsing Helper Test" {
     }
 }
 
+test "CLI Parsing Test - Unrecognized options and corner cases" {
+    const testing = std.testing;
+    var args = XxhArgs.init(testing.allocator);
+    defer args.deinit();
+
+    // -D is length 2 option that is not recognized but takes an argument
+    // -z is unrecognized option that does NOT take an argument
+    const cli_args = [_][]const u8{
+        "-D", "9090",
+        "-z",
+        "user@host",
+    };
+
+    try parseFromSlice(testing.allocator, &cli_args, &args);
+
+    try testing.expectEqualStrings("user@host", args.destination.?);
+    try testing.expectEqual(@as(usize, 3), args.ssh_args.items.len);
+    try testing.expectEqualStrings("-D", args.ssh_args.items[0]);
+    try testing.expectEqualStrings("9090", args.ssh_args.items[1]);
+    try testing.expectEqualStrings("-z", args.ssh_args.items[2]);
+}
+
+

@@ -31,3 +31,7 @@ adapters/
 .agent/
 .agents/
 .gsd/
+coverage/*
+!coverage/index.html
+
+docs/*

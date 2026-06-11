@@ -13,7 +13,7 @@ A zero-dependency, hyper-fast rewrite of the [xxh](https://github.com/xxh/xxh) o
 
 ## What is zzh?
 
-`zzh` allows you to bring your favorite interactive shell (e.g., `zsh`, `fish`, `bash`) along with all your custom configurations, themes, and plugins to any remote host you connect to via SSH. It does this without requiring administrative privileges, pre-installation on the remote host, or local Python dependencies.
+`zzh` allows you to bring your favorite interactive shell (e.g., `zsh`, `fish`, `bash`, `nu`) along with all your custom configurations, themes, and plugins to any remote host you connect to via SSH. It does this without requiring administrative privileges, pre-installation on the remote host, or local Python dependencies.
 
 ```mermaid
 sequenceDiagram
@@ -39,7 +39,7 @@ sequenceDiagram
 - **Statically Linked Binary**: No runtime dependencies on Python or external libraries.
 - **Ultra Fast Performance**: Immediate start-up times and fast execution powered by Zig's minimal, optimized runtime.
 - **Piped Archiving**: Files are compressed in memory and piped directly over a single SSH connection.
-- **Ecosystem Compatibility**: Works out-of-the-box with the standard `xxh` shells and plugins (e.g., `xxh-shell-zsh`, `xxh-plugin-prerun-zoxide`).
+- **Ecosystem Compatibility**: Works out-of-the-box with the standard `xxh` shells and plugins (e.g., `xxh-shell-zsh`,`xxh-plugin-prerun-zoxide`).
 
 ---
 
@@ -107,9 +107,19 @@ Use `zzh` exactly like you would use `ssh`. Simply prefix standard SSH commands 
 # Connect to host using zsh
 zzh user@host +s zsh
 
+# Connect to host using nushell (defaults to xxh-shell-nu)
+zzh user@host +s nu
+
+# Connect to host using the alias 'nushell'
+zzh user@host +s nushell
+
+# Connect to host using our Nushell shell package via Git
+zzh user@host +s nu+git+https://github.com/msenturk/xxh-shell-nu
+
 # Connect to host and pre-install a plugin
 zzh user@host +s zsh +I xxh-plugin-zsh-ohmyzsh
 ```
+
 
 ### Argument Syntax
 

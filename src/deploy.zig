@@ -32,7 +32,7 @@ fn formatEnvVar(allocator: std.mem.Allocator, env_var: []const u8, to_base64: bo
     }
 }
 
-pub fn buildRemoteCommand(allocator: std.mem.Allocator, xxh_args: *const cli.XxhArgs) ![]const u8 {
+pub noinline fn buildRemoteCommand(allocator: std.mem.Allocator, xxh_args: *const cli.XxhArgs) ![]const u8 {
     var cmd_buf = std.ArrayList(u8).init(allocator);
     errdefer cmd_buf.deinit();
 
@@ -133,7 +133,7 @@ fn forwardStdin(child_stdin: std.fs.File, parent_stdin: std.fs.File) void {
     }
 }
 
-pub fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const cli.XxhArgs, archive_path: []const u8) !void {
+pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const cli.XxhArgs, archive_path: []const u8) !void {
     const remote_cmd = try buildRemoteCommand(allocator, xxh_args);
     defer allocator.free(remote_cmd);
 
@@ -332,8 +332,329 @@ test "Remote Command Builder Test" {
     try args.env.append(try testing.allocator.dupe(u8, "VAR1=VAL1"));
     args.verbose = true;
 
+    // Test OOM path to cover errdefer cmd_buf.deinit()
+    _ = buildRemoteCommand(testing.failing_allocator, &args) catch |err| {
+        try testing.expect(err == error.OutOfMemory);
+    };
+
     const cmd = try buildRemoteCommand(testing.allocator, &args);
     defer testing.allocator.free(cmd);
 
     try testing.expectEqualStrings("mkdir -p ~/.zzh && tar -xf - -C ~/.zzh && ~/.zzh/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -e VAR1=VkFMMQ==", cmd);
+}
+
+test "Remote Command Builder Test - Comprehensive" {
+    const testing = std.testing;
+
+    var args = cli.XxhArgs.init(testing.allocator);
+    defer args.deinit();
+
+    args.shell = try testing.allocator.dupe(u8, "zsh");
+    args.host_xxh_home = try testing.allocator.dupe(u8, "/custom/home");
+    
+    // Flags
+    args.install_force_full = true;
+    args.host_xxh_home_remove = true;
+    args.vverbose = true;
+    
+    // Command and File execution
+    args.host_execute_file = try testing.allocator.dupe(u8, "script.sh");
+    args.host_execute_command = try testing.allocator.dupe(u8, "echo hello");
+    
+    // Env vars with and without quotes, and without =
+    try args.env.append(try testing.allocator.dupe(u8, "VAR1=\"VAL1\""));
+    try args.env.append(try testing.allocator.dupe(u8, "VAR2='VAL2'"));
+    try args.env.append(try testing.allocator.dupe(u8, "VAR_NO_VAL"));
+    
+    // Raw envb (to_base64 is false)
+    try args.envb.append(try testing.allocator.dupe(u8, "B64VAR1=VAL1"));
+    try args.envb.append(try testing.allocator.dupe(u8, "B64VAR_NO_VAL"));
+
+    // Host homes
+    args.host_home = try testing.allocator.dupe(u8, "/host/home");
+    args.host_home_xdg = try testing.allocator.dupe(u8, "/xdg/config");
+
+    // Execute bash
+    try args.host_execute_bash.append(try testing.allocator.dupe(u8, "bash_cmd"));
+
+    const cmd = try buildRemoteCommand(testing.allocator, &args);
+    defer testing.allocator.free(cmd);
+
+    // Verify commands inside cmd
+    try testing.expect(std.mem.indexOf(u8, cmd, "rm -rf /custom/home &&") != null);
+    try testing.expect(std.mem.indexOf(u8, cmd, "mkdir -p /custom/home && tar -xf - -C /custom/home") != null);
+    try testing.expect(std.mem.indexOf(u8, cmd, " -f \"script.sh\"") != null);
+    try testing.expect(std.mem.indexOf(u8, cmd, " -C ZWNobyBoZWxsbw==") != null); // base64 of "echo hello"
+    try testing.expect(std.mem.indexOf(u8, cmd, " -v 2") != null);
+    try testing.expect(std.mem.indexOf(u8, cmd, " -e VAR1=VkFMMQ==") != null); // base64 of "VAL1" (quotes trimmed)
+    try testing.expect(std.mem.indexOf(u8, cmd, " -e VAR2=VkFMMg==") != null); // base64 of "VAL2" (quotes trimmed)
+    try testing.expect(std.mem.indexOf(u8, cmd, " -e VAR_NO_VAL") != null);
+    try testing.expect(std.mem.indexOf(u8, cmd, " -e B64VAR1=VAL1") != null);
+    try testing.expect(std.mem.indexOf(u8, cmd, " -e B64VAR_NO_VAL") != null);
+    try testing.expect(std.mem.indexOf(u8, cmd, " -H /host/home") != null);
+    try testing.expect(std.mem.indexOf(u8, cmd, " -X /xdg/config") != null);
+    try testing.expect(std.mem.indexOf(u8, cmd, " -b YmFzaF9jbWQ=") != null); // base64 of "bash_cmd"
+    try testing.expect(std.mem.indexOf(u8, cmd, " && rm -rf /custom/home") != null);
+}
+
+test "Remote Command Builder Test - install_force" {
+    const testing = std.testing;
+
+    var args = cli.XxhArgs.init(testing.allocator);
+    defer args.deinit();
+
+    args.shell = try testing.allocator.dupe(u8, "zsh");
+    args.host_xxh_home = try testing.allocator.dupe(u8, "/custom/home");
+    args.install_force = true;
+    args.install_force_full = false;
+
+    const cmd = try buildRemoteCommand(testing.allocator, &args);
+    defer testing.allocator.free(cmd);
+
+    try testing.expect(std.mem.indexOf(u8, cmd, "rm -rf /custom/home/.zzh &&") != null);
+}
+
+fn getTempDir(allocator: std.mem.Allocator) ![]const u8 {
+    const builtin = @import("builtin");
+    if (builtin.os.tag == .windows) {
+        var env_map = try std.process.getEnvMap(allocator);
+        defer env_map.deinit();
+        if (env_map.get("TEMP")) |temp| {
+            return allocator.dupe(u8, temp);
+        }
+        return allocator.dupe(u8, "C:\\Temp");
+    } else {
+        return allocator.dupe(u8, "/tmp");
+    }
+}
+
+test "Deploy and Connect Mock Test - Success" {
+    const testing = std.testing;
+    const builtin = @import("builtin");
+
+    const temp_base = try getTempDir(testing.allocator);
+    defer testing.allocator.free(temp_base);
+
+    const rand = std.crypto.random.int(u64);
+    var sub_buf: [256]u8 = undefined;
+    const sub_path = try std.fmt.bufPrint(&sub_buf, "{s}/success-{x}", .{ temp_base, rand });
+    try std.fs.makeDirAbsolute(sub_path);
+    defer std.fs.deleteTreeAbsolute(sub_path) catch {};
+
+    var sub_dir = try std.fs.openDirAbsolute(sub_path, .{});
+    defer sub_dir.close();
+
+    try sub_dir.writeFile(.{ .sub_path = "archive.tar", .data = "dummy tar bytes" });
+    var path_b: [1024]u8 = undefined;
+    const archive_path = try sub_dir.realpath("archive.tar", &path_b);
+
+    var args = cli.XxhArgs.init(testing.allocator);
+    defer args.deinit();
+
+    args.shell = try testing.allocator.dupe(u8, "zsh");
+    args.destination = try testing.allocator.dupe(u8, "localhost");
+    args.verbose = true; // Covers verbosity print branches
+    args.vverbose = true; // Covers vverbose print branches
+    
+    // Set all SSH connection options to cover their parsing and construction in deployAndConnect
+    args.ssh_port = try testing.allocator.dupe(u8, "2222");
+    args.ssh_private_key = try testing.allocator.dupe(u8, "dummy_key");
+    args.ssh_login = try testing.allocator.dupe(u8, "user");
+    args.ssh_jump_host = try testing.allocator.dupe(u8, "jump");
+    try args.ssh_options.append(try testing.allocator.dupe(u8, "ForwardAgent=yes"));
+    try args.ssh_args.append(try testing.allocator.dupe(u8, "-v"));
+
+    if (builtin.os.tag == .windows) {
+        args.ssh_command = try testing.allocator.dupe(u8, "cmd.exe");
+        try args.ssh_args.append(try testing.allocator.dupe(u8, "/c"));
+        try args.ssh_args.append(try testing.allocator.dupe(u8, "exit 0"));
+    } else {
+        args.ssh_command = try testing.allocator.dupe(u8, "true");
+    }
+
+    try deployAndConnect(testing.allocator, &args, archive_path);
+}
+
+test "Deploy and Connect Mock Test - Failure" {
+    const testing = std.testing;
+    const builtin = @import("builtin");
+
+    const temp_base = try getTempDir(testing.allocator);
+    defer testing.allocator.free(temp_base);
+
+    const rand = std.crypto.random.int(u64);
+    var sub_buf: [256]u8 = undefined;
+    const sub_path = try std.fmt.bufPrint(&sub_buf, "{s}/failure-{x}", .{ temp_base, rand });
+    try std.fs.makeDirAbsolute(sub_path);
+    defer std.fs.deleteTreeAbsolute(sub_path) catch {};
+
+    var sub_dir = try std.fs.openDirAbsolute(sub_path, .{});
+    defer sub_dir.close();
+
+    try sub_dir.writeFile(.{ .sub_path = "archive.tar", .data = "dummy tar bytes" });
+    var path_b: [1024]u8 = undefined;
+    const archive_path = try sub_dir.realpath("archive.tar", &path_b);
+
+    var args = cli.XxhArgs.init(testing.allocator);
+    defer args.deinit();
+
+    args.shell = try testing.allocator.dupe(u8, "zsh");
+    args.destination = try testing.allocator.dupe(u8, "localhost");
+
+    if (builtin.os.tag == .windows) {
+        args.ssh_command = try testing.allocator.dupe(u8, "cmd.exe");
+        try args.ssh_args.append(try testing.allocator.dupe(u8, "/c"));
+        try args.ssh_args.append(try testing.allocator.dupe(u8, "exit 1"));
+    } else {
+        args.ssh_command = try testing.allocator.dupe(u8, "false");
+    }
+
+    const res = deployAndConnect(testing.allocator, &args, archive_path);
+    try testing.expectError(error.DeploymentFailed, res);
+}
+
+fn createPipe() !struct { read: std.fs.File, write: std.fs.File } {
+    const builtin = @import("builtin");
+    if (builtin.os.tag == .windows) {
+        const windows = std.os.windows;
+        var read_handle: windows.HANDLE = undefined;
+        var write_handle: windows.HANDLE = undefined;
+        var sa = windows.SECURITY_ATTRIBUTES{
+            .nLength = @sizeOf(windows.SECURITY_ATTRIBUTES),
+            .lpSecurityDescriptor = null,
+            .bInheritHandle = windows.TRUE,
+        };
+        const res = windows.kernel32.CreatePipe(&read_handle, &write_handle, &sa, 0);
+        if (res == 0) return error.PipeCreationFailed;
+        return .{
+            .read = std.fs.File{ .handle = read_handle },
+            .write = std.fs.File{ .handle = write_handle },
+        };
+    } else {
+        const pipe_fds = try std.posix.pipe();
+        return .{
+            .read = std.fs.File{ .handle = pipe_fds[0] },
+            .write = std.fs.File{ .handle = pipe_fds[1] },
+        };
+    }
+}
+
+test "forwardStdin Unit Test" {
+    const testing = std.testing;
+
+    const pipe1 = try createPipe();
+    const pipe2 = try createPipe();
+
+    var thread = try std.Thread.spawn(.{}, forwardStdin, .{ pipe2.write, pipe1.read });
+
+    const test_data = "hello world from pipe";
+    try pipe1.write.writeAll(test_data);
+    pipe1.write.close();
+
+    thread.join();
+    pipe2.write.close();
+
+    var buf: [100]u8 = undefined;
+    const amt = try pipe2.read.readAll(&buf);
+    pipe2.read.close();
+
+    try testing.expectEqualStrings(test_data, buf[0..amt]);
+}
+
+test "Deploy and Connect Mock Test - Step 1 Signal Failure" {
+    const testing = std.testing;
+    const builtin = @import("builtin");
+
+    if (builtin.os.tag == .windows) return;
+
+    const temp_base = try getTempDir(testing.allocator);
+    defer testing.allocator.free(temp_base);
+
+    const rand = std.crypto.random.int(u64);
+    var sub_buf: [256]u8 = undefined;
+    const sub_path = try std.fmt.bufPrint(&sub_buf, "{s}/sig1-{x}", .{ temp_base, rand });
+    try std.fs.makeDirAbsolute(sub_path);
+    defer std.fs.deleteTreeAbsolute(sub_path) catch {};
+
+    var sub_dir = try std.fs.openDirAbsolute(sub_path, .{});
+    defer sub_dir.close();
+
+    try sub_dir.writeFile(.{ .sub_path = "archive.tar", .data = "dummy tar bytes" });
+    var path_b1: [1024]u8 = undefined;
+    const archive_path = try sub_dir.realpath("archive.tar", &path_b1);
+
+    var args = cli.XxhArgs.init(testing.allocator);
+    defer args.deinit();
+
+    args.shell = try testing.allocator.dupe(u8, "zsh");
+    args.destination = try testing.allocator.dupe(u8, "localhost");
+
+    // Write a script that immediately terminates with SIGKILL
+    try sub_dir.writeFile(.{ .sub_path = "mock_ssh_sig1.sh", .data = "#!/bin/sh\nkill -9 $$\n" });
+    var path_b2: [1024]u8 = undefined;
+    const mock_ssh_path = try sub_dir.realpath("mock_ssh_sig1.sh", &path_b2);
+    const chmod_argv = [_][]const u8{ "chmod", "+x", mock_ssh_path };
+    try @import("package.zig").runCommand(testing.allocator, &chmod_argv);
+
+    args.ssh_command = try testing.allocator.dupe(u8, mock_ssh_path);
+
+    const res = deployAndConnect(testing.allocator, &args, archive_path);
+    try testing.expectError(error.DeploymentTerminated, res);
+}
+
+test "Deploy and Connect Mock Test - Step 2 Signal Failure" {
+    const testing = std.testing;
+    const builtin = @import("builtin");
+
+    if (builtin.os.tag == .windows) return;
+
+    const temp_base = try getTempDir(testing.allocator);
+    defer testing.allocator.free(temp_base);
+
+    const rand = std.crypto.random.int(u64);
+    var sub_buf: [256]u8 = undefined;
+    const sub_path = try std.fmt.bufPrint(&sub_buf, "{s}/sig2-{x}", .{ temp_base, rand });
+    try std.fs.makeDirAbsolute(sub_path);
+    defer std.fs.deleteTreeAbsolute(sub_path) catch {};
+
+    var sub_dir = try std.fs.openDirAbsolute(sub_path, .{});
+    defer sub_dir.close();
+
+    try sub_dir.writeFile(.{ .sub_path = "archive.tar", .data = "dummy tar bytes" });
+    var path_b1: [1024]u8 = undefined;
+    const archive_path = try sub_dir.realpath("archive.tar", &path_b1);
+
+    var args = cli.XxhArgs.init(testing.allocator);
+    defer args.deinit();
+
+    args.shell = try testing.allocator.dupe(u8, "zsh");
+    args.destination = try testing.allocator.dupe(u8, "localhost");
+
+    // Write a stateful script that exits 0 first time, and exits with SIGKILL second time
+    const state_file_path = try std.fs.path.join(testing.allocator, &.{ archive_path, "_state" });
+    defer testing.allocator.free(state_file_path);
+
+    const script_content = try std.fmt.allocPrint(testing.allocator,
+        "#!/bin/sh\n" ++
+        "if [ -f \"{s}\" ]; then\n" ++
+        "  rm -f \"{s}\"\n" ++
+        "  kill -9 $$\n" ++
+        "else\n" ++
+        "  touch \"{s}\"\n" ++
+        "  exit 0\n" ++
+        "fi\n",
+        .{ state_file_path, state_file_path, state_file_path }
+    );
+    defer testing.allocator.free(script_content);
+
+    try sub_dir.writeFile(.{ .sub_path = "mock_ssh_sig2.sh", .data = script_content });
+    var path_b2: [1024]u8 = undefined;
+    const mock_ssh_path = try sub_dir.realpath("mock_ssh_sig2.sh", &path_b2);
+    const chmod_argv = [_][]const u8{ "chmod", "+x", mock_ssh_path };
+    try @import("package.zig").runCommand(testing.allocator, &chmod_argv);
+
+    args.ssh_command = try testing.allocator.dupe(u8, mock_ssh_path);
+
+    // Should complete without error even if step 2 gets a signal (since step 2 logs it but doesn't propagate error)
+    try deployAndConnect(testing.allocator, &args, archive_path);
 }
