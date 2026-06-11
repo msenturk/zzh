@@ -1,0 +1,18 @@
+[tools]
+zig = "0.13.0"
+
+[tasks.build]
+description = "Build zzh in debug mode"
+run = "zig build"
+
+[tasks.release]
+description = "Build zzh in release mode"
+run = "zig build -Doptimize=ReleaseSmall"
+
+[tasks.test]
+description = "Run unit tests"
+run = "zig build test"
+
+[tasks.clean]
+description = "Remove build artifacts and cache"
+run = "rm -rf zig-out .zig-cache"

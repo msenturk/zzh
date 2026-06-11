@@ -1,0 +1,24 @@
+# zzh Demo Configuration File (config.zzhc)
+#
+# This file is used to configure default options for SSH connections and shells.
+# It matches hosts using regex patterns and merges arguments sequentially.
+
+hosts:
+  # Matches any host you connect to
+  ".*":
+    +s: zsh               # Use zsh as the default portable shell
+    +hhh: "~"             # Set target home directory to "~"
+
+  # Matches connections to localhost (e.g. root@127.0.0.1 or 127.0.0.1)
+  "127.0.0.1":
+    -p: 2222              # Use port 2222 for local test container
+    +if:                  # Force reinstall xxh packages (install-force flag)
+    +e:                   # Inject environment variables
+      - OSH_THEME="powerlevel10k"
+      - E2E_TEST="active"
+
+  # Matches target hosts matching 'prod-server*'
+  "prod-server-.*":
+    -o: StrictHostKeyChecking=no
+    -o: UserKnownHostsFile=/dev/null
+    +I: xxh-plugin-zsh-ohmyzsh    # Pre-install Oh My Zsh plugin

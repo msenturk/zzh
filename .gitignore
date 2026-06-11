@@ -1,0 +1,33 @@
+# Zig build directories
+.zig-cache/
+zig-out/
+
+# Binary and debug outputs
+*.exe
+*.pdb
+*.o
+*.obj
+*.so
+*.dylib
+
+# OS/IDE specific files
+.DS_Store
+.vscode/
+.idea/
+*.suo
+*.user
+
+# Preserved project rules
+.*
+!.gitignore
+!.github/
+*.md
+!README.md
+scripts/
+
+# IDE, agent and model settings
+.gemini/
+adapters/
+.agent/
+.agents/
+.gsd/
