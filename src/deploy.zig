@@ -381,6 +381,7 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, zzh_args: *const 
         child.stdout_behavior = .Pipe;
         child.stderr_behavior = .Inherit;
 
+        const deploy_start_time = std.time.milliTimestamp();
         try child.spawn();
 
         const PayloadThread = struct {
@@ -480,11 +481,10 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, zzh_args: *const 
             t.join();
         }
 
-        const wait_start_time = std.time.milliTimestamp();
         const term = try child.wait();
-        const elapsed_wait = std.time.milliTimestamp() - wait_start_time;
+        const elapsed_deploy = std.time.milliTimestamp() - deploy_start_time;
         if (zzh_args.time) {
-            std.debug.print("=> SSH command finished in {d} ms\n", .{ elapsed_wait });
+            std.debug.print("=> SSH deployment finished in {d} ms\n", .{ elapsed_deploy });
         }
 
         // Clean up payload early to prevent leftover files if the interactive session is killed
