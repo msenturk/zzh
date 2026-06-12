@@ -88,6 +88,7 @@ test "Integration: Payload Bundler layout and file copying" {
 
     // Run the bundler
     var dummy_args = @import("cli.zig").ZzhArgs.init(testing.allocator);
+    dummy_args.install_force = true;
     defer dummy_args.deinit();
     const result = try bundler.buildPayload(testing.allocator, shell_path, &plugin_paths, &dummy_args);
     defer bundler.cleanupBundle(testing.allocator, result);

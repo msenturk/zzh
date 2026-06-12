@@ -218,6 +218,7 @@ test "Payload Bundler Test" {
     const plugin_paths = [_][]const u8{plugin_path};
 
     var dummy_args = @import("cli.zig").ZzhArgs.init(testing.allocator);
+    dummy_args.install_force = true;
     defer dummy_args.deinit();
     const result = try buildPayload(testing.allocator, shell_path, &plugin_paths, &dummy_args);
     defer cleanupBundle(testing.allocator, result);
@@ -265,6 +266,7 @@ test "Payload Bundler Test - with build subdirectories and build.sh" {
     const plugin_paths = [_][]const u8{plugin_path};
 
     var dummy_args = @import("cli.zig").ZzhArgs.init(testing.allocator);
+    dummy_args.install_force = true;
     defer dummy_args.deinit();
     const result = try buildPayload(testing.allocator, shell_path, &plugin_paths, &dummy_args);
     defer cleanupBundle(testing.allocator, result);
@@ -314,6 +316,7 @@ test "Payload Bundler Test - build script failure and errdefer" {
     const plugin_paths = [_][]const u8{plugin_path};
 
     var dummy_args = @import("cli.zig").ZzhArgs.init(testing.allocator);
+    dummy_args.install_force = true;
     defer dummy_args.deinit();
     const res = buildPayload(testing.allocator, shell_path, &plugin_paths, &dummy_args);
     try testing.expectError(error.BuildScriptFailed, res);
