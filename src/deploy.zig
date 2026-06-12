@@ -174,6 +174,7 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
     const ssh_cmd = xxh_args.ssh_command orelse "ssh";
     try common_argv.append(try allocator.dupe(u8, ssh_cmd));
 
+    try common_argv.append(try allocator.dupe(u8, "-C")); // Enable SSH native compression to speed up transfer without local CPU bottleneck
     try common_argv.append(try allocator.dupe(u8, "-o"));
     try common_argv.append(try allocator.dupe(u8, "StrictHostKeyChecking=accept-new"));
 

@@ -83,9 +83,13 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
     const temp_build_dir = try std.fs.path.join(allocator, &.{ home, ".zzh", "tmp", temp_name });
     errdefer allocator.free(temp_build_dir);
 
-    var archive_buf: [64]u8 = undefined;
-    const archive_name = try std.fmt.bufPrint(&archive_buf, "payload-{x}.tar.gz", .{random_val});
-    const archive_path = try std.fs.path.join(allocator, &.{ home, ".zzh", "tmp", archive_name });
+    var hex_buf: [16]u8 = undefined;
+    const hex_id = try std.fmt.bufPrint(&hex_buf, "{x}", .{random_val});
+
+    var archive_name = std.ArrayList(u8).init(allocator);
+    defer archive_name.deinit();
+    try archive_name.writer().print("payload-{s}.tar", .{hex_id});
+    const archive_path = try std.fs.path.join(allocator, &.{ home, ".zzh", "tmp", archive_name.items });
     errdefer allocator.free(archive_path);
 
     // Make sure tmp directory exists
@@ -145,9 +149,10 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
         try copyDirRecursive(allocator, plugin_src, dest_plugin_dir);
     }
 
-    // Run system tar command with gzip compression
-    std.debug.print("Creating compressed payload archive {s}...\n", .{ archive_path });
-    const argv = [_][]const u8{ "tar", "-czf", archive_path, "-C", temp_build_dir, "." };
+    // Run system tar command without local gzip compression (to save CPU bottleneck).
+    // We will use ssh -C to compress the transfer on the fly instead!
+    std.debug.print("Creating payload archive {s}...\n", .{ archive_path });
+    const argv = [_][]const u8{ "tar", "-cf", archive_path, "-C", temp_build_dir, "." };
     try package.runCommand(allocator, &argv);
 
     return .{
