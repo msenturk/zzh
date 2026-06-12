@@ -311,20 +311,15 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
                     const bar_width = 40;
                     const filled = (uploaded_size * bar_width) / total_size;
                     
-                    std.debug.print("\r[", .{});
-                    var i: usize = 0;
-                    while (i < bar_width) : (i += 1) {
-                        if (i < filled) {
-                            std.debug.print("=", .{});
-                        } else if (i == filled and i < bar_width - 1) {
-                            std.debug.print(">", .{});
-                        } else {
-                            std.debug.print(" ", .{});
-                        }
+                    var bar_chars: [40]u8 = undefined;
+                    for (&bar_chars, 0..) |*c, i| {
+                        if (i < filled) c.* = '=';
+                        else if (i == filled and i < bar_width - 1) c.* = '>';
+                        else c.* = ' ';
                     }
                     const mb_uploaded = uploaded_size / (1024 * 1024);
                     const mb_total = total_size / (1024 * 1024);
-                    std.debug.print("] {d:>3}% ({d} MB / {d} MB)", .{ percent, mb_uploaded, mb_total });
+                    std.debug.print("\r[{s}] {d:>3}% ({d} MB / {d} MB)", .{ bar_chars, percent, mb_uploaded, mb_total });
                 }
             }
         }
