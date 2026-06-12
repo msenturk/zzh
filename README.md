@@ -34,6 +34,17 @@ sequenceDiagram
 
 ---
 
+## How is zzh different from xxh?
+
+While `zzh` maintains strict compatibility with the `xxh` ecosystem (it downloads and uses original `xxh` shells and plugins perfectly), it is built entirely differently under the hood:
+
+- **Zero Python Dependency**: `xxh` requires Python 3 to be installed locally to run its complex orchestrator scripts. `zzh` is a single, statically-linked Zig binary that runs out-of-the-box on any machine.
+- **Blazing Fast Local Execution**: `xxh` copies thousands of plugin and shell files around locally using Python loops. `zzh` computes a cryptographic payload hash and implements **Payload Tarball Caching**. The first time you connect, the tarball is cached locally. Future connections bypass local filesystem iteration entirely and push the pre-compiled payload instantly.
+- **Streamlined SSH Architecture**: `xxh` uses Python's `pexpect` module to simulate a terminal session for payload deployment, which can be brittle. `zzh` natively pipes the deployment tarball over standard SSH data streams before swapping you into an interactive PTY.
+- **Cross-Platform**: Because `zzh` is written in Zig, it supports native `ReleaseSmall` compilations for Windows, Linux, and macOS (including ARM variants) out of the box with zero runtime libraries required.
+
+---
+
 ## Features
 
 - **Statically Linked Binary**: No runtime dependencies on Python or external libraries.
