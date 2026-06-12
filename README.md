@@ -321,6 +321,8 @@ use completions/zzh.nu
 | `++update` | Update all cached packages via `git pull` |
 | `++tmux` | Attach to persistent tmux session (auto-downloads tmux) |
 | `++tmux-session <name>` | Tmux session name (default: `zzh`) |
+| `+hh <path>` | Remote path to deploy payload to (default: `~/.zzh`) |
+| `+hhr` | Ephemeral mode: automatically remove payload from remote after disconnect |
 | `+if` / `+iff` | Force reinstall payload / full home |
 | `+hc <cmd>` | Execute command on remote and exit |
 | `+hf <file>` | Execute local script on remote and exit |
