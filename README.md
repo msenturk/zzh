@@ -154,20 +154,41 @@ zzh +I xxh-plugin-zsh-powerlevel10k
 zzh +L
 ```
 
-### Dotfile Sync
+### Sending Files & Configs to Remote
+
+`zzh` has two mechanisms for getting local files onto the remote host:
+
+#### `+d` — Dotfile Sync (symlink to `~/`)
+
+Bundles the file in the payload and creates a symlink in the remote user's home directory. The symlink is recreated on every connection.
 
 ```bash
-# Sync a single dotfile to remote ~/
+# Sync a dotfile — available as ~/.vimrc on remote
 zzh user@host +s zsh +d ~/.vimrc
 
-# Sync multiple dotfiles
+# Sync multiple files
 zzh user@host +s zsh +d ~/.vimrc +d ~/.gitconfig +d ~/.tmux.conf
 
-# Sync an entire config directory
+# Sync an entire config directory — available as ~/.config/nvim on remote
 zzh user@host +s zsh +d ~/.config/nvim
+
+# Sync a tool config — available as ~/.ripgreprc on remote
+zzh user@host +s zsh +d ~/.ripgreprc
 ```
 
-Dotfiles are bundled in the payload and symlinked into the remote user's `~/` automatically on every connection.
+> The file is stored at `~/.zzh/.zzh/dotfiles/<name>` on the remote and symlinked to `~/.<name>`. The symlink is refreshed on every connection, so local changes always propagate automatically.
+
+#### Coming soon: `+f local:remote/path` — Explicit File Placement
+
+For files that need to go to a **specific remote path** rather than `~/` (e.g., a tool config at `~/.config/ripgrep/ripgreprc`):
+
+```bash
+# Place a file at an explicit remote path (planned)
+zzh user@host +s zsh +f ~/.config/ripgrep/ripgreprc:~/.config/ripgrep/ripgreprc
+zzh user@host +s zsh +f ./server.conf:~/.config/myapp/server.conf
+```
+
+For now, `+d` covers the vast majority of use cases since most tools respect `~/.<name>` dotfile conventions.
 
 ### Portable Tmux
 
@@ -191,6 +212,41 @@ zzh +I tmux
 - On first use, `zzh` downloads a static `tmux` binary (`~/.zzh/bin/tmux`) for the remote architecture.
 - The binary is bundled in the payload and placed at `~/.zzh/bin/tmux` on the remote — **outside** the payload directory, so it persists across `+if` reinstalls.
 - The shell entrypoint is automatically wrapped in `tmux new-session -A -s <session>`.
+
+### Static Binary Provisioning — `+b` *(coming soon)*
+
+Install any static binary from GitHub/GitLab releases directly on the remote host — no root required, no package manager, fully portable.
+
+```bash
+# Install ripgrep on remote (auto-detects remote arch)
+zzh user@host +s zsh +b BurntSushi/ripgrep
+
+# Install multiple tools
+zzh user@host +s zsh +b BurntSushi/ripgrep +b sharkdp/fd +b sharkdp/bat
+
+# Install a specific version
+zzh user@host +s zsh +b zyedidia/micro@v2.0.14
+
+# Install from full URL
+zzh user@host +s zsh +b https://github.com/zyedidia/micro
+```
+
+**How it works:**
+- zzh probes the remote's architecture and OS (`uname -m`, musl vs glibc) via a quick SSH check
+- Queries the GitHub Releases API to find the correct pre-built asset
+- Downloads and caches the binary locally at `~/.zzh/bins/<name>`
+- Bundles it in the payload at tarball root `bin/<name>` → permanent at `~/.zzh/bin/<name>` on remote
+- `~/.zzh/bin/` is automatically added to `$PATH` in your remote shell
+- Survives `+if` reinstalls (just like `++tmux`)
+
+**Key difference from `+I`:**
+| | `+I xxh-plugin-*` | `+b repo/tool` |
+|---|---|---|
+| Source | xxh ecosystem git repos | Any GitHub/GitLab release |
+| Format | xxh plugin structure | Plain static binary |
+| Location | `~/.zzh/.zzh/plugins/` | `~/.zzh/bin/` |
+| Persistence | Wiped on `+if` | Survives `+if` |
+| Purpose | Shell integrations | CLI tools in PATH |
 
 ### Auto-Update Packages
 
@@ -256,12 +312,13 @@ use completions/zzh.nu
 | Argument | Description |
 |---|---|
 | `+s, ++shell <name>` | Shell to use (`zsh`, `fish`, `nu`, `xonsh`, `bash`) |
-| `+I <pkg>` | Install package (`xxh-plugin-*`, `xxh-shell-*`, or `tmux`) |
+| `+I <pkg>` | Install xxh package (`xxh-plugin-*`, `xxh-shell-*`, or `tmux`) |
+| `+b <repo>` | *(coming soon)* Install static binary from GitHub/GitLab releases |
+| `+d <file>` | Sync dotfile/config — symlinked to `~/` on remote |
 | `+R <pkg>` | Remove package |
 | `+L` | List installed packages |
 | `+LS` / `+LP` | List installed shells / plugins |
 | `++update` | Update all cached packages via `git pull` |
-| `+d <file>` | Sync dotfile to remote `~/` |
 | `++tmux` | Attach to persistent tmux session (auto-downloads tmux) |
 | `++tmux-session <name>` | Tmux session name (default: `zzh`) |
 | `+if` / `+iff` | Force reinstall payload / full home |
