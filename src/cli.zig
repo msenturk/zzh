@@ -93,6 +93,7 @@ pub const XxhArgs = struct {
     // raw target & arguments pass-through
     destination: ?[]const u8 = null,
     ssh_args: std.ArrayList([]const u8), // other unparsed ssh args
+    help: bool = false, // -h, --help
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) XxhArgs {
@@ -158,7 +159,9 @@ pub fn parseFromSlice(allocator: std.mem.Allocator, args: []const []const u8, xx
     var i: usize = 0;
     while (i < args.len) {
         const arg = args[i];
-        if (std.mem.eql(u8, arg, "-p")) {
+        if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+            xxh_args.help = true;
+        } else if (std.mem.eql(u8, arg, "-p")) {
             i += 1;
             if (i < args.len) {
                 if (xxh_args.ssh_port) |v| allocator.free(v);

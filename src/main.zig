@@ -79,6 +79,54 @@ fn listShellsOrPlugins(allocator: std.mem.Allocator, local_xxh_home: ?[]const u8
     }
 }
 
+fn printHelp() void {
+    const stdout = std.io.getStdOut().writer();
+    stdout.print(
+        \\Usage: zzh [ssh arguments] [user@]host[:port] [zzh arguments]
+        \\
+        \\Bring your favorite shell wherever you go through the ssh.
+        \\
+        \\Examples:
+        \\  zzh user@host +s zsh                            # Connect with zsh
+        \\  zzh user@host +s nu +p nu-polars                # Connect with nushell and polars plugin
+        \\  zzh -i id_rsa -p 2222 user@host +s fish         # Connect using specific key and port
+        \\
+        \\Arguments:
+        \\  [user@]host[:port]       Destination host (e.g. root@192.168.1.5:2222)
+        \\
+        \\SSH Arguments:
+        \\  -p, -l, -i, -J, -o       Standard SSH arguments (Port, Login, IdentityFile, ProxyJump, Options)
+        \\  Any other -flag          Passed natively to the ssh command
+        \\
+        \\zzh Arguments:
+        \\  -h, --help               Print this beautiful help message
+        \\  +s, ++shell <name>       Shell to use (e.g. zsh, fish, nu, xonsh)
+        \\  +p, ++plugin <name>      Plugin to install and load (e.g. zsh-autosuggestions)
+        \\  +i, ++install            Force install packages without connecting
+        \\  +if, ++install-force     Force re-download packages
+        \\  +xc, ++zzh-config <path> Path to config.zzhc file
+        \\  +e, ++env <NAME=VAL>     Set environment variable on host
+        \\  +eb, ++envb <NAME=B64>   Set base64 encoded environment variable
+        \\  +P, ++password <pass>    SSH password (use ++password-prompt for secure prompt)
+        \\
+        \\Package Management:
+        \\  +I, ++install-zzh-packages <pkg>   Install package locally
+        \\  +L, ++list-zzh-packages            List installed packages
+        \\  +RI, ++reinstall-zzh-packages      Reinstall package
+        \\  +R, ++remove-zzh-packages          Remove package
+        \\  +LS, ++list-shells                 List installed shells
+        \\  +LP, ++list-plugins                List installed plugins
+        \\
+        \\Host Execution:
+        \\  +hc, ++host-execute-command <cmd>  Run a command on host and exit
+        \\  +hf, ++host-execute-file <file>    Run a local file script on host and exit
+        \\  +heb, ++host-execute-bash <b64>    Run base64 bash command on host
+        \\
+        \\For more details, visit: https://github.com/msenturk/zzh
+        \\
+    , .{}) catch {};
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -138,6 +186,11 @@ pub fn main() !void {
     var cli_args_only = try cli.parseArgs(allocator);
     defer cli_args_only.deinit();
 
+    if (cli_args_only.help) {
+        printHelp();
+        return;
+    }
+
     // Check if we are performing a local packages operation
     const has_local_ops_only = cli_args_only.destination == null and (
         cli_args_only.has_list_xxh_packages or
@@ -149,8 +202,7 @@ pub fn main() !void {
     );
 
     if (cli_args_only.destination == null and !has_local_ops_only) {
-        std.debug.print("Usage: zzh [ssh arguments] [user@]host[:port] [zzh arguments]\n", .{});
-        std.debug.print("Example: zzh user@host +s zsh\n", .{});
+        printHelp();
         std.process.exit(1);
     }
 
