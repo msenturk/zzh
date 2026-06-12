@@ -292,12 +292,43 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
         var archive_file = try std.fs.openFileAbsolute(archive_path, .{});
         defer archive_file.close();
 
-        var buf: [4096]u8 = undefined;
+        const file_stat = try archive_file.stat();
+        const total_size = file_stat.size;
+        var uploaded_size: u64 = 0;
+        var last_percent: u64 = 200;
+
+        var buf: [32768]u8 = undefined;
         while (true) {
             const amt = try archive_file.read(&buf);
             if (amt == 0) break;
             try child.stdin.?.writeAll(buf[0..amt]);
+            uploaded_size += amt;
+
+            if (total_size > 0) {
+                const percent = (uploaded_size * 100) / total_size;
+                if (percent != last_percent or uploaded_size == total_size) {
+                    last_percent = percent;
+                    const bar_width = 40;
+                    const filled = (uploaded_size * bar_width) / total_size;
+                    
+                    std.debug.print("\r[", .{});
+                    var i: usize = 0;
+                    while (i < bar_width) : (i += 1) {
+                        if (i < filled) {
+                            std.debug.print("=", .{});
+                        } else if (i == filled and i < bar_width - 1) {
+                            std.debug.print(">", .{});
+                        } else {
+                            std.debug.print(" ", .{});
+                        }
+                    }
+                    const mb_uploaded = uploaded_size / (1024 * 1024);
+                    const mb_total = total_size / (1024 * 1024);
+                    std.debug.print("] {d:>3}% ({d} MB / {d} MB)", .{ percent, mb_uploaded, mb_total });
+                }
+            }
         }
+        std.debug.print("\n", .{});
         child.stdin.?.close();
         child.stdin = null;
 
