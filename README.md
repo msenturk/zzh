@@ -160,7 +160,7 @@ zzh +L
 
 #### `+d` — Dotfile Sync (symlink to `~/`)
 
-Bundles the file in the payload and creates a symlink in the remote user's home directory. The symlink is recreated on every connection.
+Bundles local configuration files or directories in the payload and symlinks them to the remote user's home directory.
 
 ```bash
 # Sync a dotfile — available as ~/.vimrc on remote
@@ -176,7 +176,12 @@ zzh user@host +s zsh +d ~/.config/nvim
 zzh user@host +s zsh +d ~/.ripgreprc
 ```
 
-> The file is stored at `~/.zzh/.zzh/dotfiles/<name>` on the remote and symlinked to `~/.<name>`. The symlink is refreshed on every connection, so local changes always propagate automatically.
+`zzh` handles dotfiles with robust safety and synchronization features:
+
+* **Obsolete Cleanup**: If you sync dotfiles in one connection and remove them from the command in the next, `zzh` automatically detects this, cleans up the obsolete symlink, and restores any original backup file.
+* **Side-by-Side Diffs**: If a remote file/directory differs from the incoming local one, `zzh` prints a side-by-side (two-panel) diff (or falls back to a unified diff on BusyBox/minimal hosts) so you can review changes.
+* **Interactive Prompts**: It prompts you for confirmation (`Overwrite on remote? [y/N]`) before applying the change. In non-interactive environments (scripts/automated tasks), it bypasses prompting and auto-overwrites safely.
+* **Backup & Restore**: When overwriting, `zzh` moves the old file/directory to `<name>.zzh-bak`. If the contents match the local files exactly, no redundant backup is created.
 
 #### Coming soon: `+f local:remote/path` — Explicit File Placement
 
