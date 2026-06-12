@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const package = @import("package.zig");
 const config = @import("config.zig");
 const cli = @import("cli.zig");
+const deploy = @import("deploy.zig");
 
 fn dirExists(path: []const u8) bool {
     std.fs.accessAbsolute(path, .{}) catch return false;
@@ -76,22 +77,33 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
     const home = config.getHomeDir(allocator) orelse return error.HomeDirNotFound;
     defer allocator.free(home);
 
-    // Create unique random names for temp dir and archive
+    // Compute the unique hash for the payload based on versions
+    const hash = try deploy.getDeploymentHash(allocator, zzh_args);
+    defer allocator.free(hash);
+
+    var archive_name = std.ArrayList(u8).init(allocator);
+    defer archive_name.deinit();
+    try archive_name.writer().print("payload-{s}.tar", .{hash});
+    const archive_path = try std.fs.path.join(allocator, &.{ home, ".zzh", "tmp", archive_name.items });
+    errdefer allocator.free(archive_path);
+
+    if (dirExists(archive_path) and !zzh_args.install_force and !zzh_args.install_force_full) {
+        if (zzh_args.time) {
+            std.debug.print("=> Re-using cached payload archive {s}\n", .{archive_path});
+        }
+        return .{
+            .temp_build_dir = try allocator.dupe(u8, ""),
+            .archive_path = archive_path,
+        };
+    }
+
+    // Create unique random names for temp dir
     const random_val = std.crypto.random.int(u64);
     var name_buf: [64]u8 = undefined;
     const temp_name = try std.fmt.bufPrint(&name_buf, "zzh-build-{x}", .{random_val});
 
     const temp_build_dir = try std.fs.path.join(allocator, &.{ home, ".zzh", "tmp", temp_name });
     errdefer allocator.free(temp_build_dir);
-
-    var hex_buf: [16]u8 = undefined;
-    const hex_id = try std.fmt.bufPrint(&hex_buf, "{x}", .{random_val});
-
-    var archive_name = std.ArrayList(u8).init(allocator);
-    defer archive_name.deinit();
-    try archive_name.writer().print("payload-{s}.tar", .{hex_id});
-    const archive_path = try std.fs.path.join(allocator, &.{ home, ".zzh", "tmp", archive_name.items });
-    errdefer allocator.free(archive_path);
 
     // Make sure tmp directory exists
     const tmp_parent = try std.fs.path.join(allocator, &.{ home, ".zzh", "tmp" });
@@ -174,9 +186,11 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
 }
 
 pub fn cleanupBundle(allocator: std.mem.Allocator, result: BundleResult) void {
-    std.fs.deleteTreeAbsolute(result.temp_build_dir) catch {};
-    std.fs.deleteTreeAbsolute(result.archive_path) catch {};
-    allocator.free(result.temp_build_dir);
+    if (result.temp_build_dir.len > 0) {
+        std.fs.deleteTreeAbsolute(result.temp_build_dir) catch {};
+        allocator.free(result.temp_build_dir);
+    }
+    // We intentionally DO NOT delete result.archive_path to cache the tarball for future connections!
     allocator.free(result.archive_path);
 }
 

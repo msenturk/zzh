@@ -137,7 +137,7 @@ fn forwardStdin(child_stdin: std.fs.File, parent_stdin: std.fs.File) void {
     }
 }
 
-fn getDeploymentHash(allocator: std.mem.Allocator, zzh_args: *const cli.ZzhArgs) ![]const u8 {
+pub fn getDeploymentHash(allocator: std.mem.Allocator, zzh_args: *const cli.ZzhArgs) ![]const u8 {
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
     if (zzh_args.shell) |s| {
         hasher.update(s);
