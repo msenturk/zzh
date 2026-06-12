@@ -1,0 +1,47 @@
+#compdef zzh
+
+_zzh() {
+  local -a args
+
+  args=(
+    "(- :)--help[Show help message and exit]"
+    "(- :)+V[++version][Show version information]"
+    "+I[++install-plugin][Install plugin]:plugin name:_files"
+    "++install-zzh-packages[Install zzh packages]:package name:_files"
+    "+R[++remove-zzh-packages][Remove zzh packages]:package name:_files"
+    "++reinstall-zzh-packages[Reinstall zzh packages]:package name:_files"
+    "+L[++list-zzh-packages][List installed zzh packages]"
+    "+LS[++list-shells][List installed shells]"
+    "+LP[++list-plugins][List installed plugins]"
+    "++update[Update all locally cached packages via git pull]"
+    "+s[++shell][Set shell (e.g. zsh, bash, nu, xonsh, fish)]:shell name:(zsh bash nu xonsh fish)"
+    "+e[++env][Set environment variable]:key=value: "
+    "+eb[++envb][Set base64 encoded environment variable]:key=value: "
+    "+d[++dotfile][Sync dotfile to remote]:file:_files"
+    "+xc[++zzh-config][Path to config.zzhc file]:file:_files"
+    "+lh[++local-zzh-home][Path to local .zzh directory]:directory:_files"
+    "+h[++host-zzh-home][Path to remote .zzh directory]:directory: "
+    "+hh[++host-home][Path to remote HOME directory]:directory: "
+    "+hx[++host-home-xdg][Path to remote XDG directory]:directory: "
+    "+hr[++host-zzh-home-remove][Remove remote .zzh directory after execution]"
+    "+if[++install-force][Force package installation on host]"
+    "+iff[++install-force-full][Force full package installation on host including core]"
+    "+hc[++host-execute-command][Execute command on host and exit]:command: "
+    "+hf[++host-execute-file][Execute file on host and exit]:file:_files"
+    "+heb[++host-execute-bash][Execute base64 bash command on host]:b64_command: "
+    "-v[Verbose output]"
+    "-vv[Super verbose output]"
+    "-p[SSH port]:port: "
+    "-i[SSH private key]:file:_files"
+    "-l[SSH login name]:login: "
+    "-o[SSH option]:option: "
+    "-J[SSH jump host]:jump_host: "
+    "++password[SSH password]:password: "
+    "++time[Show timing information]"
+    "*:destination:_hosts"
+  )
+
+  _arguments -s -S $args
+}
+
+_zzh "$@"

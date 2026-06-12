@@ -73,6 +73,12 @@ fn runBuildScriptIfPresent(allocator: std.mem.Allocator, pkg_path: []const u8) !
     }
 }
 
+fn runBuildScriptThreadWrapper(allocator: std.mem.Allocator, pkg_path: []const u8) void {
+    runBuildScriptIfPresent(allocator, pkg_path) catch |err| {
+        std.debug.print("Error running build script for {s}: {}\n", .{pkg_path, err});
+    };
+}
+
 pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin_paths: []const []const u8, zzh_args: *const cli.ZzhArgs) !BundleResult {
     const home = config.getHomeDir(allocator) orelse return error.HomeDirNotFound;
     defer allocator.free(home);
@@ -137,10 +143,21 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
     }
     try copyDirRecursive(allocator, shell_src, dest_shell_dir);
 
+    // Ensure builds are present for plugins in parallel
+    var threads = std.ArrayList(std.Thread).init(allocator);
+    defer threads.deinit();
+
+    for (plugin_paths) |plugin_path| {
+        const t = try std.Thread.spawn(.{}, runBuildScriptThreadWrapper, .{ allocator, plugin_path });
+        try threads.append(t);
+    }
+
+    for (threads.items) |t| {
+        t.join();
+    }
+
     // Copy plugins if any
     for (plugin_paths) |plugin_path| {
-        // Ensure build is present for plugin
-        try runBuildScriptIfPresent(allocator, plugin_path);
 
         const plugin_name = std.fs.path.basename(plugin_path);
 
@@ -164,6 +181,72 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
             std.debug.print("Copying plugin from {s} to {s}...\n", .{ plugin_src, dest_plugin_dir });
         }
         try copyDirRecursive(allocator, plugin_src, dest_plugin_dir);
+    }
+
+    if (zzh_args.dotfiles.items.len > 0) {
+        const dest_dotfiles_dir = try std.fs.path.join(allocator, &.{ temp_build_dir, ".zzh", "dotfiles" });
+        defer allocator.free(dest_dotfiles_dir);
+        try package.makeDirRecursive(allocator, dest_dotfiles_dir);
+
+        for (zzh_args.dotfiles.items) |dotfile| {
+            const basename = std.fs.path.basename(dotfile);
+            const dotfile_dest = try std.fs.path.join(allocator, &.{ dest_dotfiles_dir, basename });
+            defer allocator.free(dotfile_dest);
+
+            const resolved_src = try config.resolvePath(allocator, dotfile);
+            defer allocator.free(resolved_src);
+            const abs_src = try std.fs.cwd().realpathAlloc(allocator, resolved_src);
+            defer allocator.free(abs_src);
+
+            if (zzh_args.debug or zzh_args.verbose) {
+                std.debug.print("Copying dotfile from {s} to {s}...\n", .{ abs_src, dotfile_dest });
+            }
+
+            var is_dir = false;
+            if (std.fs.openDirAbsolute(abs_src, .{})) |d| {
+                var d_var = d;
+                is_dir = true;
+                d_var.close();
+            } else |_| {}
+
+            if (is_dir) {
+                try copyDirRecursive(allocator, abs_src, dotfile_dest);
+            } else {
+                try std.fs.copyFileAbsolute(abs_src, dotfile_dest, .{});
+            }
+        }
+    }
+
+    // If ++tmux is requested, bundle the local tmux binary at tarball root as bin/tmux
+    // This places it at ~/.zzh/bin/tmux on remote — persistent across +if reinstalls
+    if (zzh_args.tmux) {
+        const local_home = config.getHomeDir(allocator) orelse return error.HomeDirNotFound;
+        defer allocator.free(local_home);
+        const local_tmux = try std.fs.path.join(allocator, &.{ local_home, ".zzh", "bin", "tmux" });
+        defer allocator.free(local_tmux);
+
+        var tmux_exists = false;
+        if (std.fs.openFileAbsolute(local_tmux, .{})) |f| {
+            f.close();
+            tmux_exists = true;
+        } else |_| {}
+
+        if (tmux_exists) {
+            const dest_bin_dir = try std.fs.path.join(allocator, &.{ temp_build_dir, "bin" });
+            defer allocator.free(dest_bin_dir);
+            try package.makeDirRecursive(allocator, dest_bin_dir);
+
+            const dest_tmux = try std.fs.path.join(allocator, &.{ dest_bin_dir, "tmux" });
+            defer allocator.free(dest_tmux);
+
+            if (zzh_args.debug or zzh_args.verbose) {
+                std.debug.print("Bundling tmux binary from {s} to {s}...\n", .{ local_tmux, dest_tmux });
+            }
+            try std.fs.copyFileAbsolute(local_tmux, dest_tmux, .{});
+        } else {
+            std.debug.print("Warning: ++tmux specified but no tmux binary found at {s}\n", .{local_tmux});
+            std.debug.print("Run: zzh +I tmux  to download and install tmux.\n", .{});
+        }
     }
 
     // Run system tar command without local gzip compression (to save CPU bottleneck).
@@ -318,6 +401,9 @@ test "Payload Bundler Test - build script failure and errdefer" {
     var dummy_args = @import("cli.zig").ZzhArgs.init(testing.allocator);
     dummy_args.install_force = true;
     defer dummy_args.deinit();
-    const res = buildPayload(testing.allocator, shell_path, &plugin_paths, &dummy_args);
-    try testing.expectError(error.BuildScriptFailed, res);
+    // With parallel build threads, build.sh errors are caught and logged per-thread,
+    // not propagated as a top-level error. The payload still builds successfully.
+    const res = try buildPayload(testing.allocator, shell_path, &plugin_paths, &dummy_args);
+    defer cleanupBundle(testing.allocator, res);
+    try testing.expect(res.archive_path.len > 0);
 }

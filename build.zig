@@ -34,7 +34,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
-        .strip = true,
     });
 
     // This declares intent for the executable to be installed into the
@@ -89,4 +88,15 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
+
+    const e2e_exe = b.addExecutable(.{
+        .name = "test-e2e",
+        .root_source_file = b.path("src/test-e2e.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_e2e = b.addRunArtifact(e2e_exe);
+    const e2e_step = b.step("e2e", "Run end-to-end tests");
+    e2e_step.dependOn(&run_e2e.step);
 }

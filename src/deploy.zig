@@ -66,6 +66,21 @@ pub noinline fn buildRemoteCommand(allocator: std.mem.Allocator, zzh_args: *cons
     }
     try shell_pkg_name.appendSlice(shell);
 
+    // If ++tmux, wrap the entrypoint in the persistent tmux binary at ~/.zzh/bin/tmux
+    // The entrypoint.sh + all its args become the tmux window-command string.
+    // We build: ~/.zzh/bin/tmux new-session -A -s <session> 'ENTRYPOINT [args]'
+    if (zzh_args.tmux) {
+        const session = zzh_args.tmux_session orelse "zzh";
+        try cmd_buf.appendSlice(host_zzh_home);
+        try cmd_buf.appendSlice("/bin/tmux new-session -A -s '");
+        try cmd_buf.appendSlice(session);
+        try cmd_buf.appendSlice("' ");
+    }
+
+    // entrypoint command (quoted for tmux if needed)
+    const ep_start = cmd_buf.items.len;
+    _ = ep_start;
+    if (zzh_args.tmux) try cmd_buf.append('\"');
     try cmd_buf.appendSlice(host_zzh_home);
     try cmd_buf.appendSlice("/.zzh/shells/");
     try cmd_buf.appendSlice(shell_pkg_name.items);
@@ -120,9 +135,22 @@ pub noinline fn buildRemoteCommand(allocator: std.mem.Allocator, zzh_args: *cons
         try cmd_buf.appendSlice(b_b64);
     }
 
+    for (zzh_args.dotfiles.items) |d| {
+        const basename = std.fs.path.basename(d);
+        const ln_cmd = try std.fmt.allocPrint(allocator, "ln -sf $XXH_HOME/.zzh/dotfiles/{s} ~/{s}", .{ basename, basename });
+        defer allocator.free(ln_cmd);
+        const b_b64 = try b64Encode(allocator, ln_cmd);
+        defer allocator.free(b_b64);
+        try cmd_buf.appendSlice(" -b ");
+        try cmd_buf.appendSlice(b_b64);
+    }
+
     if (zzh_args.host_zzh_home_remove) {
+        if (zzh_args.tmux) try cmd_buf.append('\"');
         try cmd_buf.appendSlice(" && rm -rf ");
         try cmd_buf.appendSlice(host_zzh_home);
+    } else if (zzh_args.tmux) {
+        try cmd_buf.append('\"');
     }
 
     return cmd_buf.toOwnedSlice();
@@ -145,6 +173,14 @@ pub fn getDeploymentHash(allocator: std.mem.Allocator, zzh_args: *const cli.ZzhA
     for (zzh_args.plugins.items) |p| {
         hasher.update("|");
         hasher.update(p);
+    }
+    for (zzh_args.dotfiles.items) |d| {
+        hasher.update("|D|");
+        hasher.update(d);
+    }
+    if (zzh_args.tmux) {
+        hasher.update("|tmux|");
+        if (zzh_args.tmux_session) |s| hasher.update(s);
     }
     var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
     hasher.final(&digest);

@@ -1,0 +1,37 @@
+export extern "zzh" [
+    destination?: string             # Target host (e.g. user@host)
+    --help                           # Show help message and exit
+    --version(-V)                    # Show version information
+    --install-plugin(-I): string     # Install plugin
+    --install-zzh-packages: string   # Install zzh packages
+    --remove-zzh-packages(-R): string# Remove zzh packages
+    --reinstall-zzh-packages: string # Reinstall zzh packages
+    --list-zzh-packages(-L)          # List installed zzh packages
+    --list-shells(-LS)               # List installed shells
+    --list-plugins(-LP)              # List installed plugins
+    --update                         # Update all locally cached packages via git pull
+    --shell(-s): string              # Set shell (e.g. zsh, bash, nu, xonsh, fish)
+    --env(-e): string                # Set environment variable
+    --envb(-eb): string              # Set base64 encoded environment variable
+    --dotfile(-d): string            # Sync dotfile to remote
+    --zzh-config(-xc): string        # Path to config.zzhc file
+    --local-zzh-home(-lh): string    # Path to local .zzh directory
+    --host-zzh-home(-h): string      # Path to remote .zzh directory
+    --host-home(-hh): string         # Path to remote HOME directory
+    --host-home-xdg(-hx): string     # Path to remote XDG directory
+    --host-zzh-home-remove(-hr)      # Remove remote .zzh directory after execution
+    --install-force(-if)             # Force package installation on host
+    --install-force-full(-iff)       # Force full package installation on host including core
+    --host-execute-command(-hc): string # Execute command on host and exit
+    --host-execute-file(-hf): string # Execute file on host and exit
+    --host-execute-bash(-heb): string# Execute base64 bash command on host
+    -v                               # Verbose output
+    -vv                              # Super verbose output
+    -p: string                       # SSH port
+    -i: string                       # SSH private key
+    -l: string                       # SSH login name
+    -o: string                       # SSH option
+    -J: string                       # SSH jump host
+    --password: string               # SSH password
+    --time                           # Show timing information
+]

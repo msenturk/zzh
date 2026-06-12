@@ -209,6 +209,104 @@ fn downloadFromTree(allocator: std.mem.Allocator, name: []const u8, git_url: []c
     }
 }
 
+pub fn updatePackages(allocator: std.mem.Allocator, local_xxh_home: ?[]const u8) !void {
+    var base_dir: []const u8 = undefined;
+    if (local_xxh_home) |lh| {
+        base_dir = try config.resolvePath(allocator, lh);
+    } else {
+        const home = config.getHomeDir(allocator) orelse return error.HomeDirNotFound;
+        defer allocator.free(home);
+        base_dir = try std.fs.path.join(allocator, &.{ home, ".zzh" });
+    }
+    defer allocator.free(base_dir);
+
+    const sub_dirs = [_][]const u8{ "shells", "plugins" };
+    for (sub_dirs) |sub_dir| {
+        const dir_path = try std.fs.path.join(allocator, &.{ base_dir, ".zzh", sub_dir });
+        defer allocator.free(dir_path);
+
+        var dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch continue;
+        defer dir.close();
+
+        var it = dir.iterate();
+        while (try it.next()) |entry| {
+            if (entry.kind == .directory) {
+                const pkg_dir = try std.fs.path.join(allocator, &.{ dir_path, entry.name });
+                defer allocator.free(pkg_dir);
+
+                const git_dir = try std.fs.path.join(allocator, &.{ pkg_dir, ".git" });
+                defer allocator.free(git_dir);
+
+                std.fs.accessAbsolute(git_dir, .{}) catch continue; // skip if not a git repo
+
+                std.debug.print("Updating {s}...\n", .{entry.name});
+                const argv = [_][]const u8{ "git", "pull", "--rebase" };
+                var child = std.process.Child.init(&argv, allocator);
+                child.cwd = pkg_dir;
+                child.stdout_behavior = .Inherit;
+                child.stderr_behavior = .Inherit;
+                child.spawn() catch {
+                    std.debug.print("Failed to spawn git pull for {s}\n", .{entry.name});
+                    continue;
+                };
+                _ = child.wait() catch continue;
+            }
+        }
+    }
+}
+
+/// Downloads a portable static `tmux` binary and installs it to `~/.zzh/bin/tmux`.
+/// Currently uses `nelsonenzo/tmux-appimage` for Linux x86_64.
+/// On other platforms, prints a skip message.
+pub fn downloadTmux(allocator: std.mem.Allocator, install_force: bool, local_xxh_home: ?[]const u8) ![]const u8 {
+    var base_dir: []const u8 = undefined;
+    if (local_xxh_home) |lh| {
+        base_dir = try config.resolvePath(allocator, lh);
+    } else {
+        const home = config.getHomeDir(allocator) orelse return error.HomeDirNotFound;
+        defer allocator.free(home);
+        base_dir = try std.fs.path.join(allocator, &.{ home, ".zzh" });
+    }
+    defer allocator.free(base_dir);
+
+    const bin_dir = try std.fs.path.join(allocator, &.{ base_dir, "bin" });
+    errdefer allocator.free(bin_dir);
+    try makeDirRecursive(allocator, bin_dir);
+
+    const tmux_path = try std.fs.path.join(allocator, &.{ bin_dir, "tmux" });
+    errdefer allocator.free(tmux_path);
+
+    // Check already installed
+    const exists = blk: {
+        std.fs.accessAbsolute(tmux_path, .{}) catch { break :blk false; };
+        break :blk true;
+    };
+
+    if (exists and !install_force) {
+        std.debug.print("tmux already installed at {s}\n", .{tmux_path});
+        return tmux_path;
+    }
+
+    // AppImage is only for Linux x86_64 without musl; for musl/arm we try a different source
+    const builtin = @import("builtin");
+    if (builtin.os.tag == .linux and builtin.cpu.arch == .x86_64) {
+        const TMUX_VERSION = "3.5a";
+        const url = "https://github.com/nelsonenzo/tmux-appimage/releases/download/" ++ TMUX_VERSION ++ "/tmux.appimage";
+        std.debug.print("Downloading portable tmux {s} from {s}...\n", .{ TMUX_VERSION, url });
+        const curl_argv = [_][]const u8{ "curl", "-fsSL", "-o", tmux_path, url };
+        try runCommand(allocator, &curl_argv);
+        // Make executable
+        const chmod_argv = [_][]const u8{ "chmod", "+x", tmux_path };
+        try runCommand(allocator, &chmod_argv);
+        std.debug.print("tmux installed to {s}\n", .{tmux_path});
+    } else {
+        std.debug.print("Automatic tmux download is only supported for Linux x86_64.\n", .{});
+        std.debug.print("Please install tmux manually and copy the binary to {s}\n", .{tmux_path});
+    }
+
+    return tmux_path;
+}
+
 pub fn downloadAndCachePackage(allocator: std.mem.Allocator, pkg: ResolvedPackage, is_shell: bool, install_force: bool, local_xxh_home: ?[]const u8) ![]const u8 {
     var base_dir: []const u8 = undefined;
     if (local_xxh_home) |lh| {

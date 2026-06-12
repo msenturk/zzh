@@ -110,12 +110,16 @@ fn printHelp() void {
         \\  +P, ++password <pass>    SSH password (use ++password-prompt for secure prompt)
         \\
         \\Package Management:
-        \\  +I, ++install-zzh-packages <pkg>   Install package locally
+        \\  +I, ++install-zzh-packages <pkg>   Install package locally (use 'tmux' for portable tmux)
         \\  +L, ++list-zzh-packages            List installed packages
         \\  +RI, ++reinstall-zzh-packages      Reinstall package
         \\  +R, ++remove-zzh-packages          Remove package
         \\  +LS, ++list-shells                 List installed shells
         \\  +LP, ++list-plugins                List installed plugins
+        \\  ++update                           Update all cached packages (git pull)
+        \\  ++tmux                             Attach to (or create) a tmux session on remote
+        \\  ++tmux-session <name>              Tmux session name (default: zzh)
+        \\  +d, ++dotfile <file>               Sync dotfile to remote home
         \\
         \\Host Execution:
         \\  +hc, ++host-execute-command <cmd>  Run a command on host and exit
@@ -198,7 +202,8 @@ pub fn main() !void {
         cli_args_only.list_plugins or
         cli_args_only.install_zzh_packages.items.len > 0 or
         cli_args_only.reinstall_zzh_packages.items.len > 0 or
-        cli_args_only.remove_zzh_packages.items.len > 0
+        cli_args_only.remove_zzh_packages.items.len > 0 or
+        cli_args_only.update_packages
     );
 
     if (cli_args_only.destination == null and !has_local_ops_only) {
@@ -248,12 +253,24 @@ pub fn main() !void {
     var package_op_performed = false;
     if (merged_args.install_zzh_packages.items.len > 0) {
         for (merged_args.install_zzh_packages.items) |pkg_name| {
+            // tmux is a special standalone binary, not a git repo
+            if (std.mem.eql(u8, pkg_name, "tmux") or std.mem.eql(u8, pkg_name, "bin-tmux")) {
+                const tmux_path = try package.downloadTmux(allocator, merged_args.install_force, merged_args.local_zzh_home);
+                allocator.free(tmux_path);
+                package_op_performed = true;
+                continue;
+            }
             const is_shell = std.mem.indexOf(u8, pkg_name, "-shell-") != null;
             const resolved = try package.resolvePackage(allocator, pkg_name, is_shell);
             defer package.freeResolvedPackage(allocator, resolved);
             const path = try package.downloadAndCachePackage(allocator, resolved, is_shell, merged_args.install_force, merged_args.local_zzh_home);
             allocator.free(path);
         }
+        package_op_performed = true;
+    }
+
+    if (merged_args.update_packages) {
+        try package.updatePackages(allocator, merged_args.local_zzh_home);
         package_op_performed = true;
     }
 

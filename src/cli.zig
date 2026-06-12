@@ -40,6 +40,7 @@ pub const ZzhArgs = struct {
     plugins: std.ArrayList([]const u8), // +I, ++install-plugin, ++install-zzh-packages
     env: std.ArrayList([]const u8), // +e, ++env
     envb: std.ArrayList([]const u8), // +eb, ++envb
+    dotfiles: std.ArrayList([]const u8), // +d, ++dotfile
     
     // config & home paths
     config_path: ?[]const u8 = null, // +xc, ++zzh-config, ++config
@@ -73,6 +74,7 @@ pub const ZzhArgs = struct {
     list_shells: bool = false, // +LS, +list-shells
     list_plugins: bool = false, // +LP, +list-plugins
     extract_sourcing_files: bool = false, // +ES, ++extract-sourcing-files
+    update_packages: bool = false, // ++update
     
     // ssh & connection params
     ssh_port: ?[]const u8 = null, // -p
@@ -96,6 +98,8 @@ pub const ZzhArgs = struct {
     help: bool = false, // -h, --help
     debug: bool = false, // ++debug
     time: bool = false, // ++time
+    tmux: bool = false, // ++tmux
+    tmux_session: ?[]const u8 = null, // ++tmux-session
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) ZzhArgs {
@@ -103,6 +107,7 @@ pub const ZzhArgs = struct {
             .plugins = std.ArrayList([]const u8).init(allocator),
             .env = std.ArrayList([]const u8).init(allocator),
             .envb = std.ArrayList([]const u8).init(allocator),
+            .dotfiles = std.ArrayList([]const u8).init(allocator),
             .host_execute_bash = std.ArrayList([]const u8).init(allocator),
             .install_zzh_packages = std.ArrayList([]const u8).init(allocator),
             .list_zzh_packages = std.ArrayList([]const u8).init(allocator),
@@ -133,6 +138,7 @@ pub const ZzhArgs = struct {
         if (self.copy_method) |m| self.allocator.free(m);
         if (self.scp_command) |c| self.allocator.free(c);
         if (self.destination) |d| self.allocator.free(d);
+        if (self.tmux_session) |s| self.allocator.free(s);
 
         for (self.plugins.items) |p| self.allocator.free(p);
         self.plugins.deinit();
@@ -140,6 +146,8 @@ pub const ZzhArgs = struct {
         self.env.deinit();
         for (self.envb.items) |e| self.allocator.free(e);
         self.envb.deinit();
+        for (self.dotfiles.items) |d| self.allocator.free(d);
+        self.dotfiles.deinit();
         for (self.host_execute_bash.items) |b| self.allocator.free(b);
         self.host_execute_bash.deinit();
         for (self.install_zzh_packages.items) |p| self.allocator.free(p);
@@ -227,6 +235,21 @@ pub fn parseFromSlice(allocator: std.mem.Allocator, args: []const []const u8, zz
             i += 1;
             if (i < args.len) {
                 try zzh_args.envb.append(try allocator.dupe(u8, args[i]));
+            }
+        } else if (std.mem.eql(u8, arg, "+d") or std.mem.eql(u8, arg, "++dotfile")) {
+            i += 1;
+            if (i < args.len) {
+                try zzh_args.dotfiles.append(try allocator.dupe(u8, args[i]));
+            }
+        } else if (std.mem.eql(u8, arg, "++update")) {
+            zzh_args.update_packages = true;
+        } else if (std.mem.eql(u8, arg, "++tmux")) {
+            zzh_args.tmux = true;
+        } else if (std.mem.eql(u8, arg, "++tmux-session")) {
+            i += 1;
+            if (i < args.len) {
+                if (zzh_args.tmux_session) |v| allocator.free(v);
+                zzh_args.tmux_session = try allocator.dupe(u8, args[i]);
             }
         } else if (std.mem.eql(u8, arg, "+lh") or std.mem.eql(u8, arg, "++local-zzh-home")) {
             i += 1;
