@@ -53,7 +53,9 @@ pub noinline fn buildRemoteCommand(allocator: std.mem.Allocator, xxh_args: *cons
     try cmd_buf.appendSlice(host_xxh_home);
     try cmd_buf.appendSlice(" && tar -xmf - -C ");
     try cmd_buf.appendSlice(host_xxh_home);
-    try cmd_buf.appendSlice(" && ");
+    try cmd_buf.appendSlice(" && chmod -R +x ");
+    try cmd_buf.appendSlice(host_xxh_home);
+    try cmd_buf.appendSlice("/.zzh 2>/dev/null || true && ");
 
     var shell_pkg_name = std.ArrayList(u8).init(allocator);
     defer shell_pkg_name.deinit();
@@ -148,7 +150,7 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
     while (it.next()) |part| {
         if (!found_tar) {
             try deploy_cmd_parts.append(part);
-            if (std.mem.startsWith(u8, part, "tar -xf ")) {
+            if (std.mem.startsWith(u8, part, "tar -xmf ")) {
                 found_tar = true;
             }
         } else {
@@ -428,7 +430,7 @@ test "Remote Command Builder Test" {
     const cmd = try buildRemoteCommand(testing.allocator, &args);
     defer testing.allocator.free(cmd);
 
-    try testing.expectEqualStrings("mkdir -p ~/.zzh && tar -xf - -C ~/.zzh && ~/.zzh/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -e VAR1=VkFMMQ==", cmd);
+    try testing.expectEqualStrings("mkdir -p ~/.zzh && tar -xmf - -C ~/.zzh && chmod -R +x ~/.zzh/.zzh 2>/dev/null || true && ~/.zzh/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -e VAR1=VkFMMQ==", cmd);
 }
 
 test "Remote Command Builder Test - Comprehensive" {
@@ -470,7 +472,7 @@ test "Remote Command Builder Test - Comprehensive" {
 
     // Verify commands inside cmd
     try testing.expect(std.mem.indexOf(u8, cmd, "rm -rf /custom/home &&") != null);
-    try testing.expect(std.mem.indexOf(u8, cmd, "mkdir -p /custom/home && tar -xf - -C /custom/home") != null);
+    try testing.expect(std.mem.indexOf(u8, cmd, "mkdir -p /custom/home && tar -xmf - -C /custom/home && chmod -R +x /custom/home/.zzh") != null);
     try testing.expect(std.mem.indexOf(u8, cmd, " -f \"script.sh\"") != null);
     try testing.expect(std.mem.indexOf(u8, cmd, " -C ZWNobyBoZWxsbw==") != null); // base64 of "echo hello"
     try testing.expect(std.mem.indexOf(u8, cmd, " -v 2") != null);
