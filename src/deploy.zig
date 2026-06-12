@@ -286,6 +286,8 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
 
         try child.spawn();
 
+        std.debug.print("Uploading payload to target host...\n", .{});
+
         // Write the tarball archive bytes to child's stdin
         var archive_file = try std.fs.openFileAbsolute(archive_path, .{});
         defer archive_file.close();
