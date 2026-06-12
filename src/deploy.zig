@@ -346,7 +346,10 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
         child.stdin = null;
         thread.detach();
 
+        const wait_start_time = std.time.milliTimestamp();
         const term = try child.wait();
+        const elapsed_wait = std.time.milliTimestamp() - wait_start_time;
+        std.debug.print("=> SSH command finished in {d} ms\n", .{ elapsed_wait });
         switch (term) {
             .Exited => |code| {
                 if (code != 0) {
