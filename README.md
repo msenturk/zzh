@@ -45,6 +45,7 @@ While `zzh` maintains strict compatibility with the `xxh` ecosystem (it download
 | **SSH handshake** | `pexpect` terminal simulation | Native pipe → PTY swap |
 | **Platforms** | Linux/macOS | Linux, macOS, Windows, ARM |
 | **Tmux** | Manual setup | `++tmux` auto-provisions portable binary |
+| **Static Binaries** | Downloads shells/plugins (no Tmux) | Auto-downloads, caches, and uploads shells, plugins, and Tmux static binaries |
 | **Dotfile sync** | Not built-in | `+d ~/.vimrc` syncs & symlinks to `~/` |
 | **Shell completions** | Not built-in | Zsh, Bash, Nushell included |
 
@@ -56,6 +57,7 @@ While `zzh` maintains strict compatibility with the `xxh` ecosystem (it download
 - **Ultra Fast Performance**: Immediate start-up times powered by Zig's minimal runtime.
 - **Payload Caching**: Cryptographic SHA-256 hash prevents redundant re-uploads on reconnect.
 - **Parallel Plugin Builds**: Plugin `build.sh` scripts run concurrently using Zig threads.
+- **Static Binary Provisioning**: Automatically downloads, caches locally, and uploads statically compiled shells, plugins, and custom tools (like `tmux`) tailored for the remote target architecture.
 - **Portable Tmux**: `++tmux` auto-downloads a static `tmux` binary and provisions it on the remote. Sessions persist across disconnects.
 - **Dotfile Sync**: `+d <file>` bundles local dotfiles and symlinks them into remote `~/` automatically.
 - **Auto-Updater**: `++update` runs `git pull --rebase` on all locally cached shells and plugins.
