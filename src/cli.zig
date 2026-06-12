@@ -41,6 +41,7 @@ pub const ZzhArgs = struct {
     env: std.ArrayList([]const u8), // +e, ++env
     envb: std.ArrayList([]const u8), // +eb, ++envb
     dotfiles: std.ArrayList([]const u8), // +d, ++dotfile
+    binaries: std.ArrayList([]const u8), // +b, ++binary
     
     // config & home paths
     config_path: ?[]const u8 = null, // +xc, ++zzh-config, ++config
@@ -109,6 +110,7 @@ pub const ZzhArgs = struct {
             .env = std.ArrayList([]const u8).init(allocator),
             .envb = std.ArrayList([]const u8).init(allocator),
             .dotfiles = std.ArrayList([]const u8).init(allocator),
+            .binaries = std.ArrayList([]const u8).init(allocator),
             .host_execute_bash = std.ArrayList([]const u8).init(allocator),
             .install_zzh_packages = std.ArrayList([]const u8).init(allocator),
             .list_zzh_packages = std.ArrayList([]const u8).init(allocator),
@@ -159,6 +161,8 @@ pub const ZzhArgs = struct {
         self.reinstall_zzh_packages.deinit();
         for (self.remove_zzh_packages.items) |p| self.allocator.free(p);
         self.remove_zzh_packages.deinit();
+        for (self.binaries.items) |b| self.allocator.free(b);
+        self.binaries.deinit();
         for (self.ssh_options.items) |o| self.allocator.free(o);
         self.ssh_options.deinit();
         for (self.ssh_args.items) |s| self.allocator.free(s);
@@ -332,6 +336,11 @@ pub fn parseFromSlice(allocator: std.mem.Allocator, args: []const []const u8, zz
             i += 1;
             if (i < args.len) {
                 try zzh_args.remove_zzh_packages.append(try allocator.dupe(u8, args[i]));
+            }
+        } else if (std.mem.eql(u8, arg, "+b") or std.mem.eql(u8, arg, "++binary")) {
+            i += 1;
+            if (i < args.len) {
+                try zzh_args.binaries.append(try allocator.dupe(u8, args[i]));
             }
         } else if (std.mem.eql(u8, arg, "+LS") or std.mem.eql(u8, arg, "++list-shells") or std.mem.eql(u8, arg, "+list-shells")) {
             zzh_args.list_shells = true;

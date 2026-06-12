@@ -6,6 +6,8 @@
 
 A zero-dependency, hyper-fast rewrite of the [xxh](https://github.com/xxh/xxh) orchestrator in Zig.
 
+
+
 > [!NOTE]
 > This project is a fork of the original **xxh** concept, rewritten in Zig to eliminate local Python dependencies, reduce execution times, and provide a single, statically-linked binary.
 
@@ -220,9 +222,9 @@ zzh +I tmux
 - The binary is bundled in the payload and placed at `~/.zzh/bin/tmux` on the remote — **outside** the payload directory, so it persists across `+if` reinstalls.
 - The shell entrypoint is automatically wrapped in `tmux new-session -A -s <session>`.
 
-### Static Binary Provisioning — `+b` *(coming soon)*
+### Static Binary Provisioning — `+b`
 
-Install any static binary from GitHub/GitLab releases directly on the remote host — no root required, no package manager, fully portable.
+Install any static binary from GitHub releases directly on the remote host — no root required, no package manager, fully portable.
 
 ```bash
 # Install ripgrep on remote (auto-detects remote arch)
@@ -324,7 +326,7 @@ use completions/zzh.nu
 |---|---|
 | `+s, ++shell <name>` | Shell to use (`zsh`, `fish`, `nu`, `xonsh`, `bash`) |
 | `+I <pkg>` | Install xxh package (`xxh-plugin-*`, `xxh-shell-*`, or `tmux`) |
-| `+b <repo>` | *(coming soon)* Install static binary from GitHub/GitLab releases |
+| `+b <repo>` | Install static binary from GitHub releases |
 | `+d <file>` | Sync dotfile/config — symlinked to `~/` on remote |
 | `+R <pkg>` | Remove cached package or binary |
 | `+L` | List installed packages |

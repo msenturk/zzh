@@ -410,10 +410,22 @@ pub fn main() !void {
         merged_args.ssh_port = try allocator.dupe(u8, p);
     }
 
-    // 6. Resolve and download shell package
+    // [1/4] Resolving packages...
+    std.debug.print("[1/4] Resolving packages...\n", .{});
     const shell_name = merged_args.shell orelse "zsh";
+    std.debug.print("      - Shell: {s} (xxh-shell-{s})\n", .{ shell_name, shell_name });
+    for (merged_args.plugins.items) |plugin_name| {
+        std.debug.print("      - Plugins: {s}\n", .{plugin_name});
+    }
+    for (merged_args.binaries.items) |repo| {
+        std.debug.print("      - Binaries: {s}\n", .{repo});
+    }
+
     const resolved_shell = try package.resolvePackage(allocator, shell_name, true);
     defer package.freeResolvedPackage(allocator, resolved_shell);
+
+    // [2/4] Downloading & caching...
+    std.debug.print("[2/4] Downloading & caching...\n", .{});
 
     const shell_path = try package.downloadAndCachePackage(allocator, resolved_shell, true, merged_args.install_force, merged_args.local_zzh_home);
     defer allocator.free(shell_path);
@@ -446,9 +458,13 @@ pub fn main() !void {
     // 8. If ++tmux, auto-download static tmux binary if not already cached locally.
     //    downloadTmux is a no-op when ~/.zzh/bin/tmux already exists (unless +if).
     if (merged_args.tmux) {
-        std.debug.print("Ensuring portable tmux is available locally...\n", .{});
         const tmux_path = try package.downloadTmux(allocator, merged_args.install_force, merged_args.local_zzh_home);
         allocator.free(tmux_path);
+    }
+
+    // 8.5 Download any static binaries requested via +b
+    for (merged_args.binaries.items) |repo| {
+        try package.downloadBinary(allocator, repo, merged_args.install_force, merged_args.local_zzh_home);
     }
 
     // 9. Bundle payload

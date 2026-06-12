@@ -108,5 +108,24 @@ pub fn main() !void {
     }
     std.debug.print("Test 2 (Tmux Deployment & Execution) Passed!\n", .{});
 
+    // Test 3: Static Binary Provisioning E2E (+b)
+    std.debug.print("Running Test 3 (Static Binary Provisioning - ripgrep)...\n", .{});
+    const args3 = [_][]const u8{
+        zzh_exe,
+        "testuser@127.0.0.1",
+        "-p", "2222",
+        "++password", "testpass",
+        "+s", "zsh",
+        "+b", "BurntSushi/ripgrep",
+        "+hc", "rg --version"
+    };
+    const out3 = try runZzh(allocator, &args3);
+    defer allocator.free(out3);
+    if (std.mem.indexOf(u8, out3, "ripgrep") == null) {
+        std.debug.print("Test 3 Failed: {s}\n", .{out3});
+        std.process.exit(1);
+    }
+    std.debug.print("Test 3 (Static Binary Provisioning - ripgrep) Passed!\n", .{});
+
     std.debug.print("All E2E Tests Passed successfully!\n", .{});
 }

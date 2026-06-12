@@ -175,7 +175,7 @@ fn downloadFromTree(allocator: std.mem.Allocator, name: []const u8, git_url: []c
             const branch = rest[0..slash_idx];
             const subfolder = rest[slash_idx + 1 ..];
 
-            std.debug.print("Downloading {s} from {s} (branch: {s}, folder: {s})...\n", .{ name, repo_url, branch, subfolder });
+            std.debug.print("      - Downloading {s} (tarball fallback)...\n", .{name});
             
             const tmp_target_dir = try std.fmt.allocPrint(allocator, "{s}_tmp", .{target_dir});
             defer allocator.free(tmp_target_dir);
@@ -283,25 +283,35 @@ pub fn downloadTmux(allocator: std.mem.Allocator, install_force: bool, local_xxh
     };
 
     if (exists and !install_force) {
-        std.debug.print("tmux already installed at {s}\n", .{tmux_path});
         return tmux_path;
     }
 
-    const TMUX_VERSION = "3.5a";
-    const url = "https://github.com/nelsonenzo/tmux-appimage/releases/download/" ++ TMUX_VERSION ++ "/tmux.appimage";
-    std.debug.print("Downloading portable tmux {s} from {s}...\n", .{ TMUX_VERSION, url });
+    const TMUX_VERSION = "v3.6a";
+    const url = "https://github.com/tmux/tmux-builds/releases/download/" ++ TMUX_VERSION ++ "/tmux-3.6a-linux-x86_64.tar.gz";
+    std.debug.print("      - Downloading portable static tmux {s}...\n", .{TMUX_VERSION});
     
+    const archive_path = try std.fmt.allocPrint(allocator, "{s}.tar.gz", .{tmux_path});
+    defer {
+        std.fs.deleteFileAbsolute(archive_path) catch {};
+        allocator.free(archive_path);
+    }
+
     const builtin = @import("builtin");
     const curl_cmd = if (builtin.os.tag == .windows) "curl.exe" else "curl";
-    const curl_argv = [_][]const u8{ curl_cmd, "-fsSL", "-o", tmux_path, url };
+    const curl_argv = [_][]const u8{ curl_cmd, "-fsSL", "-o", archive_path, url };
     try runCommand(allocator, &curl_argv);
+
+    std.debug.print("      - Extracting tmux binary...\n", .{});
+    const tar_cmd = if (builtin.os.tag == .windows) "tar.exe" else "tar";
+    const tar_argv = [_][]const u8{ tar_cmd, "-xf", archive_path, "-C", bin_dir };
+    try runCommand(allocator, &tar_argv);
 
     if (builtin.os.tag != .windows) {
         // Make executable
         const chmod_argv = [_][]const u8{ "chmod", "+x", tmux_path };
         try runCommand(allocator, &chmod_argv);
     }
-    std.debug.print("tmux installed to {s}\n", .{tmux_path});
+    std.debug.print("      - Caching tmux binary to ~/.zzh/bin/tmux...\n", .{});
 
     return tmux_path;
 }
@@ -342,18 +352,18 @@ pub fn downloadAndCachePackage(allocator: std.mem.Allocator, pkg: ResolvedPackag
 
         if (!is_shell and std.mem.startsWith(u8, pkg.clean_name, "xxh-plugin-nu-")) {
             const plugin_suffix = pkg.clean_name["xxh-plugin-nu-".len..];
-            std.debug.print("Downloading official Nushell plugin '{s}' from Nushell releases...\n", .{plugin_suffix});
+            std.debug.print("      - Downloading official Nushell plugin '{s}'...\n", .{plugin_suffix});
             try downloadOfficialNuPlugin(allocator, plugin_suffix, target_dir);
         } else {
             if (std.mem.indexOf(u8, pkg.git_url, "/tree/") != null) {
                 try downloadFromTree(allocator, pkg.clean_name, pkg.git_url, target_dir);
             } else {
                 // Standard git clone
-                std.debug.print("Downloading {s} from {s}...\n", .{ pkg.clean_name, pkg.git_url });
+                std.debug.print("      - Downloading {s}...\n", .{ pkg.clean_name });
                 const argv = [_][]const u8{ "git", "clone", "--depth=1", pkg.git_url, target_dir };
                 runCommand(allocator, &argv) catch |err| {
                     if (err == error.CommandFailed) {
-                        std.debug.print("Failed to download from {s}. Trying fallback repository...\n", .{pkg.git_url});
+                        std.debug.print("      - Failed to download from git. Trying fallback repository...\n", .{});
                         const fallback_url = try std.fmt.allocPrint(allocator, "https://github.com/msenturk/zzh/tree/main/{s}/{s}", .{sub_dir, pkg.clean_name});
                         defer allocator.free(fallback_url);
                         try downloadFromTree(allocator, pkg.clean_name, fallback_url, target_dir);
@@ -366,6 +376,319 @@ pub fn downloadAndCachePackage(allocator: std.mem.Allocator, pkg: ResolvedPackag
     }
 
     return target_dir;
+}
+
+pub fn getBinaryName(repo: []const u8) []const u8 {
+    var name = repo;
+    if (std.mem.lastIndexOfScalar(u8, repo, '/')) |idx| {
+        name = repo[idx + 1 ..];
+    }
+    if (std.mem.indexOfScalar(u8, name, '@')) |idx| {
+        name = name[0..idx];
+    }
+    // Handle specific aliases
+    if (std.mem.eql(u8, name, "ripgrep")) {
+        return "rg";
+    }
+    return name;
+}
+
+fn getRepoPath(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
+    var path = input;
+    if (std.mem.startsWith(u8, path, "https://github.com/")) {
+        path = path["https://github.com/".len..];
+    } else if (std.mem.startsWith(u8, path, "http://github.com/")) {
+        path = path["http://github.com/".len..];
+    }
+    // Trim trailing slashes
+    while (path.len > 0 and path[path.len - 1] == '/') {
+        path = path[0 .. path.len - 1];
+    }
+    return allocator.dupe(u8, path);
+}
+
+fn findFileRecursive(allocator: std.mem.Allocator, dir_path: []const u8, target_name: []const u8) !?[]const u8 {
+    var dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch |err| {
+        if (err == error.FileNotFound) return null;
+        return err;
+    };
+    defer dir.close();
+
+    var it = dir.iterate();
+    while (try it.next()) |entry| {
+        if (entry.kind == .directory) {
+            const sub_path = try std.fs.path.join(allocator, &.{ dir_path, entry.name });
+            defer allocator.free(sub_path);
+            if (try findFileRecursive(allocator, sub_path, target_name)) |found| {
+                return found;
+            }
+        } else if (entry.kind == .file or entry.kind == .sym_link) {
+            if (std.mem.eql(u8, entry.name, target_name)) {
+                return try std.fs.path.join(allocator, &.{ dir_path, entry.name });
+            }
+        }
+    }
+    return null;
+}
+
+pub fn runCommandCapture(allocator: std.mem.Allocator, argv: []const []const u8) ![]const u8 {
+    var child = std.process.Child.init(argv, allocator);
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Ignore;
+    try child.spawn();
+
+    var out_buf = std.ArrayList(u8).init(allocator);
+    errdefer out_buf.deinit();
+
+    var stdout_reader = child.stdout.?.reader();
+    while (true) {
+        var buf: [4096]u8 = undefined;
+        const amt = try stdout_reader.read(&buf);
+        if (amt == 0) break;
+        try out_buf.appendSlice(buf[0..amt]);
+    }
+
+    const term = try child.wait();
+    if (term != .Exited or term.Exited != 0) {
+        return error.CommandFailed;
+    }
+
+    return out_buf.toOwnedSlice();
+}
+
+pub fn downloadBinary(allocator: std.mem.Allocator, repo_input: []const u8, install_force: bool, local_xxh_home: ?[]const u8) !void {
+    var base_dir: []const u8 = undefined;
+    if (local_xxh_home) |lh| {
+        base_dir = try config.resolvePath(allocator, lh);
+    } else {
+        const home = config.getHomeDir(allocator) orelse return error.HomeDirNotFound;
+        defer allocator.free(home);
+        base_dir = try std.fs.path.join(allocator, &.{ home, ".zzh" });
+    }
+    defer allocator.free(base_dir);
+
+    const bin_name = getBinaryName(repo_input);
+    const bin_dir = try std.fs.path.join(allocator, &.{ base_dir, "bin" });
+    defer allocator.free(bin_dir);
+    try makeDirRecursive(allocator, bin_dir);
+
+    const dest_bin_path = try std.fs.path.join(allocator, &.{ bin_dir, bin_name });
+    defer allocator.free(dest_bin_path);
+
+    const exists = blk: {
+        std.fs.accessAbsolute(dest_bin_path, .{}) catch { break :blk false; };
+        break :blk true;
+    };
+
+    if (exists and !install_force) {
+        return;
+    }
+
+    const builtin = @import("builtin");
+    const curl_cmd = if (builtin.os.tag == .windows) "curl.exe" else "curl";
+
+    var is_direct_url = false;
+    if (std.mem.startsWith(u8, repo_input, "http://") or std.mem.startsWith(u8, repo_input, "https://")) {
+        var path = repo_input;
+        if (std.mem.startsWith(u8, path, "https://github.com/")) {
+            path = path["https://github.com/".len..];
+        } else if (std.mem.startsWith(u8, path, "http://github.com/")) {
+            path = path["http://github.com/".len..];
+        } else {
+            is_direct_url = true;
+        }
+
+        if (!is_direct_url) {
+            while (path.len > 0 and path[path.len - 1] == '/') {
+                path = path[0 .. path.len - 1];
+            }
+            var slash_count: usize = 0;
+            for (path) |char| {
+                if (char == '/') slash_count += 1;
+            }
+            if (slash_count > 1) {
+                is_direct_url = true;
+            }
+        }
+    }
+
+    if (is_direct_url) {
+        std.debug.print("      - Downloading direct file/archive from {s}...\n", .{repo_input});
+        const is_archive = std.mem.endsWith(u8, bin_name, ".tar.gz") or 
+                           std.mem.endsWith(u8, bin_name, ".tgz") or 
+                           std.mem.endsWith(u8, bin_name, ".zip");
+
+        if (is_archive) {
+            const rand = std.crypto.random.int(u64);
+            var archive_name_buf: [64]u8 = undefined;
+            const archive_name = try std.fmt.bufPrint(&archive_name_buf, "tmp_bin_{x}", .{rand});
+            const archive_path = try std.fs.path.join(allocator, &.{ bin_dir, archive_name });
+            defer {
+                std.fs.deleteFileAbsolute(archive_path) catch {};
+                allocator.free(archive_path);
+            }
+
+            var temp_extract_name_buf: [64]u8 = undefined;
+            const temp_extract_name = try std.fmt.bufPrint(&temp_extract_name_buf, "tmp_extract_{x}", .{rand});
+            const temp_extract_path = try std.fs.path.join(allocator, &.{ bin_dir, temp_extract_name });
+            defer {
+                std.fs.deleteTreeAbsolute(temp_extract_path) catch {};
+                allocator.free(temp_extract_path);
+            }
+
+            const download_argv = [_][]const u8{ curl_cmd, "-fsSL", "-o", archive_path, repo_input };
+            try runCommand(allocator, &download_argv);
+
+            try makeDirRecursive(allocator, temp_extract_path);
+            
+            std.debug.print("      - Extracting archive...\n", .{});
+            const tar_cmd = if (builtin.os.tag == .windows) "tar.exe" else "tar";
+            const tar_argv = [_][]const u8{ tar_cmd, "-xf", archive_path, "-C", temp_extract_path };
+            try runCommand(allocator, &tar_argv);
+
+            var search_name = bin_name;
+            if (std.mem.endsWith(u8, search_name, ".tar.gz")) {
+                search_name = search_name[0 .. search_name.len - ".tar.gz".len];
+            } else if (std.mem.endsWith(u8, search_name, ".tgz")) {
+                search_name = search_name[0 .. search_name.len - ".tgz".len];
+            } else if (std.mem.endsWith(u8, search_name, ".zip")) {
+                search_name = search_name[0 .. search_name.len - ".zip".len];
+            }
+
+            std.debug.print("      - Locating binary file '{s}'...\n", .{search_name});
+            const found_bin_path = try findFileRecursive(allocator, temp_extract_path, search_name);
+
+            if (found_bin_path) |fbp| {
+                defer allocator.free(fbp);
+                try std.fs.copyFileAbsolute(fbp, dest_bin_path, .{});
+                if (builtin.os.tag != .windows) {
+                    const chmod_argv = [_][]const u8{ "chmod", "+x", dest_bin_path };
+                    try runCommand(allocator, &chmod_argv);
+                }
+                std.debug.print("      - Extracting and caching to ~/.zzh/bin/{s}...\n", .{bin_name});
+            } else {
+                return error.BinaryNotFoundInArchive;
+            }
+        } else {
+            const download_argv = [_][]const u8{ curl_cmd, "-fsSL", "-o", dest_bin_path, repo_input };
+            try runCommand(allocator, &download_argv);
+            if (builtin.os.tag != .windows) {
+                const chmod_argv = [_][]const u8{ "chmod", "+x", dest_bin_path };
+                try runCommand(allocator, &chmod_argv);
+            }
+            std.debug.print("      - Caching direct binary/file to ~/.zzh/bin/{s}...\n", .{bin_name});
+        }
+        return;
+    }
+
+    var repo_path = try getRepoPath(allocator, repo_input);
+    defer allocator.free(repo_path);
+
+    var tag: ?[]const u8 = null;
+    var clean_repo = repo_path;
+    if (std.mem.indexOfScalar(u8, repo_path, '@')) |idx| {
+        clean_repo = repo_path[0..idx];
+        tag = repo_path[idx + 1 ..];
+    }
+
+    const api_url = if (tag) |t|
+        try std.fmt.allocPrint(allocator, "https://api.github.com/repos/{s}/releases/tags/{s}", .{ clean_repo, t })
+    else
+        try std.fmt.allocPrint(allocator, "https://api.github.com/repos/{s}/releases/latest", .{clean_repo});
+    defer allocator.free(api_url);
+
+    std.debug.print("      - Fetching release info from GitHub API...\n", .{});
+
+    const api_argv = [_][]const u8{ curl_cmd, "-fsSL", "-H", "User-Agent: zzh-client", api_url };
+    
+    const json_bytes = try runCommandCapture(allocator, &api_argv);
+    defer allocator.free(json_bytes);
+
+    const ReleaseAsset = struct {
+        name: []const u8,
+        browser_download_url: []const u8,
+    };
+    const ReleaseResponse = struct {
+        assets: []ReleaseAsset,
+    };
+
+    const parsed = try std.json.parseFromSlice(ReleaseResponse, allocator, json_bytes, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+
+    var best_asset: ?ReleaseAsset = null;
+    for (parsed.value.assets) |asset| {
+        const name = asset.name;
+        // Search for linux x86_64 static binary assets
+        if (std.mem.indexOf(u8, name, "linux") != null or std.mem.indexOf(u8, name, "unknown-linux") != null) {
+            if (std.mem.indexOf(u8, name, "x86_64") != null or std.mem.indexOf(u8, name, "amd64") != null) {
+                // Avoid installer formats
+                if (std.mem.endsWith(u8, name, ".deb") or std.mem.endsWith(u8, name, ".rpm") or std.mem.endsWith(u8, name, ".apk")) {
+                    continue;
+                }
+                best_asset = asset;
+                break;
+            }
+        }
+    }
+
+    // Fallback: search for any asset with x86_64/amd64 that is a tarball or zip
+    if (best_asset == null) {
+        for (parsed.value.assets) |asset| {
+            const name = asset.name;
+            if (std.mem.indexOf(u8, name, "x86_64") != null or std.mem.indexOf(u8, name, "amd64") != null) {
+                if (std.mem.endsWith(u8, name, ".tar.gz") or std.mem.endsWith(u8, name, ".tgz") or std.mem.endsWith(u8, name, ".zip")) {
+                    best_asset = asset;
+                    break;
+                }
+            }
+        }
+    }
+
+    const asset = best_asset orelse return error.NoCompatibleAssetFound;
+
+    // Create temp paths
+    const rand = std.crypto.random.int(u64);
+    var archive_name_buf: [64]u8 = undefined;
+    const archive_name = try std.fmt.bufPrint(&archive_name_buf, "tmp_bin_{x}", .{rand});
+    const archive_path = try std.fs.path.join(allocator, &.{ bin_dir, archive_name });
+    defer {
+        std.fs.deleteFileAbsolute(archive_path) catch {};
+        allocator.free(archive_path);
+    }
+
+    var temp_extract_name_buf: [64]u8 = undefined;
+    const temp_extract_name = try std.fmt.bufPrint(&temp_extract_name_buf, "tmp_extract_{x}", .{rand});
+    const temp_extract_path = try std.fs.path.join(allocator, &.{ bin_dir, temp_extract_name });
+    defer {
+        std.fs.deleteTreeAbsolute(temp_extract_path) catch {};
+        allocator.free(temp_extract_path);
+    }
+
+    std.debug.print("      - Downloading {s}...\n", .{asset.name});
+    const download_argv = [_][]const u8{ curl_cmd, "-fsSL", "-o", archive_path, asset.browser_download_url };
+    try runCommand(allocator, &download_argv);
+
+    try makeDirRecursive(allocator, temp_extract_path);
+    
+    std.debug.print("      - Extracting archive...\n", .{});
+    const tar_cmd = if (builtin.os.tag == .windows) "tar.exe" else "tar";
+    const tar_argv = [_][]const u8{ tar_cmd, "-xf", archive_path, "-C", temp_extract_path };
+    try runCommand(allocator, &tar_argv);
+
+    std.debug.print("      - Locating binary file '{s}'...\n", .{bin_name});
+    const found_bin_path = try findFileRecursive(allocator, temp_extract_path, bin_name);
+    if (found_bin_path) |fbp| {
+        defer allocator.free(fbp);
+        // Copy to final destination
+        try std.fs.copyFileAbsolute(fbp, dest_bin_path, .{});
+        if (builtin.os.tag != .windows) {
+            const chmod_argv = [_][]const u8{ "chmod", "+x", dest_bin_path };
+            try runCommand(allocator, &chmod_argv);
+        }
+        std.debug.print("      - Extracting and caching to ~/.zzh/bin/{s}...\n", .{bin_name});
+    } else {
+        return error.BinaryNotFoundInArchive;
+    }
 }
 
 test "resolvePackage Test" {
@@ -452,6 +775,13 @@ test "resolvePackage Test" {
     defer freeResolvedPackage(testing.allocator, nu5);
     try testing.expectEqualStrings("xxh-shell-nu", nu5.clean_name);
     try testing.expectEqualStrings("https://github.com/msenturk/zzh/tree/main/shells/xxh-shell-nu", nu5.git_url);
+
+    // Direct URL binary name extraction test
+    const bin1 = getBinaryName("https://raw.githubusercontent.com/xxh/static/master/xxh-demo2.gif");
+    try testing.expectEqualStrings("xxh-demo2.gif", bin1);
+
+    const bin2 = getBinaryName("https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/ripgrep-14.1.0-x86_64-unknown-linux-musl.tar.gz");
+    try testing.expectEqualStrings("ripgrep-14.1.0-x86_64-unknown-linux-musl.tar.gz", bin2);
 }
 
 const FailableAllocator = struct {

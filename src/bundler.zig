@@ -94,14 +94,26 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
     errdefer allocator.free(archive_path);
 
     if (dirExists(archive_path) and !zzh_args.install_force and !zzh_args.install_force_full) {
-        if (zzh_args.time) {
-            std.debug.print("=> Re-using cached payload archive {s}\n", .{archive_path});
-        }
+        std.debug.print("[3/4] Building payload archive...\n", .{});
+        std.debug.print("      - Re-using cached payload\n", .{});
+
+        var file_size: u64 = 0;
+        if (std.fs.openFileAbsolute(archive_path, .{})) |f| {
+            if (f.stat()) |stat| {
+                file_size = stat.size;
+            } else |_| {}
+            f.close();
+        } else |_| {}
+        const size_mb = @as(f64, @floatFromInt(file_size)) / 1024.0 / 1024.0;
+        std.debug.print("      - Done. (Size: {d:.1} MB)\n", .{size_mb});
+
         return .{
             .temp_build_dir = try allocator.dupe(u8, ""),
             .archive_path = archive_path,
         };
     }
+
+    std.debug.print("[3/4] Building payload archive...\n", .{});
 
     // Create unique random names for temp dir
     const random_val = std.crypto.random.int(u64);
@@ -137,6 +149,12 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
     defer allocator.free(dest_shell_dir);
 
     try package.makeDirRecursive(allocator, dest_shell_dir);
+
+    var clean_shell_name = shell_pkg_name;
+    if (std.mem.startsWith(u8, clean_shell_name, "xxh-shell-")) {
+        clean_shell_name = clean_shell_name["xxh-shell-".len..];
+    }
+    std.debug.print("      - Bundling shell '{s}'\n", .{clean_shell_name});
 
     if (zzh_args.debug or zzh_args.verbose) {
         std.debug.print("Copying shell from {s} to {s}...\n", .{ shell_src, dest_shell_dir });
@@ -176,6 +194,12 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
         defer allocator.free(dest_plugin_dir);
 
         try package.makeDirRecursive(allocator, dest_plugin_dir);
+
+        var clean_plugin_name = plugin_name;
+        if (std.mem.startsWith(u8, clean_plugin_name, "xxh-plugin-")) {
+            clean_plugin_name = clean_plugin_name["xxh-plugin-".len..];
+        }
+        std.debug.print("      - Bundling plugin '{s}'\n", .{clean_plugin_name});
 
         if (zzh_args.debug or zzh_args.verbose) {
             std.debug.print("Copying plugin from {s} to {s}...\n", .{ plugin_src, dest_plugin_dir });
@@ -220,9 +244,15 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
     // If ++tmux is requested, bundle the local tmux binary at tarball root as bin/tmux
     // This places it at ~/.zzh/bin/tmux on remote — persistent across +if reinstalls
     if (zzh_args.tmux) {
-        const local_home = config.getHomeDir(allocator) orelse return error.HomeDirNotFound;
-        defer allocator.free(local_home);
-        const local_tmux = try std.fs.path.join(allocator, &.{ local_home, ".zzh", "bin", "tmux" });
+        var base_dir: []const u8 = undefined;
+        if (zzh_args.local_zzh_home) |lh| {
+            base_dir = try config.resolvePath(allocator, lh);
+        } else {
+            base_dir = try std.fs.path.join(allocator, &.{ home, ".zzh" });
+        }
+        defer allocator.free(base_dir);
+
+        const local_tmux = try std.fs.path.join(allocator, &.{ base_dir, "bin", "tmux" });
         defer allocator.free(local_tmux);
 
         var tmux_exists = false;
@@ -239,10 +269,49 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
             const dest_tmux = try std.fs.path.join(allocator, &.{ dest_bin_dir, "tmux" });
             defer allocator.free(dest_tmux);
 
+            std.debug.print("      - Bundling binary 'tmux'\n", .{});
             if (zzh_args.debug or zzh_args.verbose) {
                 std.debug.print("Bundling tmux binary from {s} to {s}...\n", .{ local_tmux, dest_tmux });
             }
             try std.fs.copyFileAbsolute(local_tmux, dest_tmux, .{});
+        }
+    }
+
+    // Bundle all requested binaries from local bin cache
+    if (zzh_args.binaries.items.len > 0) {
+        var base_dir: []const u8 = undefined;
+        if (zzh_args.local_zzh_home) |lh| {
+            base_dir = try config.resolvePath(allocator, lh);
+        } else {
+            base_dir = try std.fs.path.join(allocator, &.{ home, ".zzh" });
+        }
+        defer allocator.free(base_dir);
+
+        for (zzh_args.binaries.items) |repo| {
+            const bin_name = package.getBinaryName(repo);
+            const local_bin = try std.fs.path.join(allocator, &.{ base_dir, "bin", bin_name });
+            defer allocator.free(local_bin);
+
+            var bin_exists = false;
+            if (std.fs.openFileAbsolute(local_bin, .{})) |f| {
+                f.close();
+                bin_exists = true;
+            } else |_| {}
+
+            if (bin_exists) {
+                const dest_bin_dir = try std.fs.path.join(allocator, &.{ temp_build_dir, "bin" });
+                defer allocator.free(dest_bin_dir);
+                try package.makeDirRecursive(allocator, dest_bin_dir);
+
+                const dest_bin = try std.fs.path.join(allocator, &.{ dest_bin_dir, bin_name });
+                defer allocator.free(dest_bin);
+
+                std.debug.print("      - Bundling binary '{s}'\n", .{bin_name});
+                if (zzh_args.debug or zzh_args.verbose) {
+                    std.debug.print("Bundling binary {s} from {s} to {s}...\n", .{ bin_name, local_bin, dest_bin });
+                }
+                try std.fs.copyFileAbsolute(local_bin, dest_bin, .{});
+            }
         }
     }
 
@@ -258,6 +327,16 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
     if (zzh_args.time) {
         std.debug.print("=> Creating archive took {d} ms\n", .{ elapsed_ms });
     }
+
+    var file_size: u64 = 0;
+    if (std.fs.openFileAbsolute(archive_path, .{})) |f| {
+        if (f.stat()) |stat| {
+            file_size = stat.size;
+        } else |_| {}
+        f.close();
+    } else |_| {}
+    const size_mb = @as(f64, @floatFromInt(file_size)) / 1024.0 / 1024.0;
+    std.debug.print("      - Done. (Size: {d:.1} MB)\n", .{size_mb});
 
     return .{
         .temp_build_dir = temp_build_dir,

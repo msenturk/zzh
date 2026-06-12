@@ -287,6 +287,10 @@ pub fn getDeploymentHash(allocator: std.mem.Allocator, zzh_args: *const cli.ZzhA
         hasher.update("|D|");
         hasher.update(d);
     }
+    for (zzh_args.binaries.items) |b| {
+        hasher.update("|B|");
+        hasher.update(b);
+    }
     if (zzh_args.tmux) {
         hasher.update("|tmux|");
         if (zzh_args.tmux_session) |s| hasher.update(s);
@@ -374,28 +378,38 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, zzh_args: *const 
         }
     }
 
+    const is_mock_cmd = if (zzh_args.ssh_command) |cmd|
+        std.mem.indexOf(u8, cmd, "cmd") != null
+    else
+        false;
+    const env_prefix = if (is_mock_cmd) "" else "export APPIMAGE_EXTRACT_AND_RUN=1 && ";
+
     const deploy_cmd = if (found_tar) blk: {
         const db = try std.mem.join(allocator, " && ", deploy_cmd_parts.items);
         defer allocator.free(db);
         if (zzh_args.install_force or zzh_args.install_force_full) {
              break :blk try std.fmt.allocPrint(allocator, 
-                 "echo \"ZZH_PAYLOAD_REQ\" && {s}",
-                 .{ db }
+                 "{s}echo \"ZZH_PAYLOAD_REQ\" && {s}",
+                 .{ env_prefix, db }
              );
         } else {
              const hash = try getDeploymentHash(allocator, zzh_args);
              defer allocator.free(hash);
              const target_dir = zzh_args.host_zzh_home orelse "~/.zzh";
              break :blk try std.fmt.allocPrint(allocator, 
-                 "if [ \"$(cat {s}/.payload_hash 2>/dev/null)\" != \"{s}\" ]; then echo \"ZZH_PAYLOAD_REQ\" && {s} && echo \"{s}\" > {s}/.payload_hash; else echo \"ZZH_PAYLOAD_SKIP\"; fi",
-                 .{ target_dir, hash, db, hash, target_dir }
+                 "{s}if [ \"$(cat {s}/.payload_hash 2>/dev/null)\" != \"{s}\" ]; then echo \"ZZH_PAYLOAD_REQ\" && {s} && echo \"{s}\" > {s}/.payload_hash; else echo \"ZZH_PAYLOAD_SKIP\"; fi",
+                 .{ env_prefix, target_dir, hash, db, hash, target_dir }
              );
         }
     } else null;
     defer if (deploy_cmd) |d| allocator.free(d);
 
-    const run_cmd = if (found_tar) try std.mem.join(allocator, " && ", run_cmd_parts.items) else remote_cmd;
-    defer if (found_tar) allocator.free(run_cmd);
+    const run_cmd = if (found_tar) blk: {
+        const joined = try std.mem.join(allocator, " && ", run_cmd_parts.items);
+        defer allocator.free(joined);
+        break :blk try std.fmt.allocPrint(allocator, "{s}{s}", .{ env_prefix, joined });
+    } else try std.fmt.allocPrint(allocator, "{s}{s}", .{ env_prefix, remote_cmd });
+    defer allocator.free(run_cmd);
 
     // Build common SSH argv prefix (everything except the command and -t flag)
     var common_argv = std.ArrayList([]const u8).init(allocator);
@@ -517,7 +531,7 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, zzh_args: *const 
             }
             std.debug.print("\n", .{});
         } else {
-            std.debug.print("Connecting to target host via SSH...\n", .{});
+            std.debug.print("[4/4] Deploying to remote...\n", .{});
         }
 
         var child = std.process.Child.init(deploy_argv.items, allocator);
@@ -549,31 +563,14 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, zzh_args: *const 
                     uploaded_size += amt;
 
                     if (uploaded_size > 128 * 1024 or uploaded_size == total_size) {
-                        if (!printed_header) {
-                            std.debug.print("\nUploading payload to target host...\n", .{});
-                            printed_header = true;
-                        }
-
+                        printed_header = true;
                         if (total_size > 0) {
                             const percent = (uploaded_size * 100) / total_size;
                             if (percent != last_percent or uploaded_size == total_size) {
                                 last_percent = percent;
-                                const bar_width = 40;
-                                const filled = (uploaded_size * bar_width) / total_size;
-                                
-                                var bar_chars: [40]u8 = undefined;
-                                for (&bar_chars, 0..) |*c, i| {
-                                    if (i < filled) {
-                                        c.* = '=';
-                                    } else if (i == filled and i < bar_width - 1) {
-                                        c.* = '>';
-                                    } else {
-                                        c.* = ' ';
-                                    }
-                                }
                                 const mb_uploaded = uploaded_size / (1024 * 1024);
                                 const mb_total = total_size / (1024 * 1024);
-                                std.debug.print("\r[{s}] {d:>3}% ({d} MB / {d} MB)", .{ bar_chars, percent, mb_uploaded, mb_total });
+                                std.debug.print("\r      - Uploading payload... {d:>3}% ({d} MB / {d} MB)", .{ percent, mb_uploaded, mb_total });
                             }
                         }
                     }
@@ -585,6 +582,7 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, zzh_args: *const 
         };
 
         var send_payload = false;
+        var got_response = false;
         var stdout_reader = child.stdout.?.reader();
         while (true) {
             var line_buf: [1024]u8 = undefined;
@@ -592,15 +590,27 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, zzh_args: *const 
             if (line) |l| {
                 if (std.mem.indexOf(u8, l, "ZZH_PAYLOAD_REQ") != null) {
                     send_payload = true;
+                    got_response = true;
                     break;
                 } else if (std.mem.indexOf(u8, l, "ZZH_PAYLOAD_SKIP") != null) {
                     send_payload = false;
+                    got_response = true;
                     break;
                 } else {
                     std.io.getStdOut().writer().print("{s}\n", .{l}) catch {};
                 }
             } else {
                 break;
+            }
+        }
+
+        if (!zzh_args.verbose and !zzh_args.vverbose) {
+            if (got_response) {
+                if (send_payload) {
+                    std.debug.print("      - Uploading payload to {s}...\n", .{zzh_args.destination.?});
+                } else {
+                    std.debug.print("      - Remote payload already cached (skipping upload)\n", .{});
+                }
             }
         }
 
@@ -624,22 +634,49 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, zzh_args: *const 
 
         if (thread) |t| {
             t.join();
+            if (!zzh_args.verbose and !zzh_args.vverbose) {
+                std.debug.print("      - Unpacking archive...\n", .{});
+            }
         }
 
         const term = try child.wait();
+
+        if (!got_response and (term != .Exited or term.Exited != 0)) {
+            std.debug.print("Error: SSH connection failed to establish or authenticate.\n", .{});
+            std.debug.print("Underlying command run was:", .{});
+            for (deploy_argv.items) |arg| {
+                std.debug.print(" {s}", .{arg});
+            }
+            std.debug.print("\n", .{});
+            if (zzh_args.password != null) {
+                std.debug.print("Note: If you entered a password, please verify it is correct.\n", .{});
+            }
+            if (temp_build_dir.len > 0) {
+                std.fs.deleteTreeAbsolute(temp_build_dir) catch {};
+            }
+            std.fs.deleteTreeAbsolute(archive_path) catch {};
+            return error.DeploymentFailed;
+        }
+
         const elapsed_deploy = std.time.milliTimestamp() - deploy_start_time;
         if (zzh_args.time) {
             std.debug.print("=> SSH deployment finished in {d} ms\n", .{ elapsed_deploy });
         }
 
         // Clean up payload early to prevent leftover files if the interactive session is killed
-        std.fs.deleteTreeAbsolute(temp_build_dir) catch {};
-        std.fs.deleteTreeAbsolute(archive_path) catch {};
+        if (temp_build_dir.len > 0) {
+            std.fs.deleteTreeAbsolute(temp_build_dir) catch {};
+        }
+        // Keep the local archive_path (tar file) as a cache to prevent rebuilding it on subsequent runs.
         switch (term) {
             .Exited => |code| {
                 if (code != 0) {
-                    std.debug.print("Payload deployment failed with exit code: {}\n", .{code});
-                    return error.DeploymentFailed;
+                    // On Windows, ssh.exe sometimes exits with 255 when stdin is closed even if the remote command succeeded.
+                    // If we got ZZH_PAYLOAD_SKIP, the payload is already cached on remote, so we can ignore exit code 255.
+                    if (send_payload or code != 255) {
+                        std.debug.print("Payload deployment failed with exit code: {}\n", .{code});
+                        return error.DeploymentFailed;
+                    }
                 }
             },
             else => {
@@ -665,6 +702,13 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, zzh_args: *const 
             std.debug.print(" {s}", .{arg});
         }
         std.debug.print("\n", .{});
+    }
+
+    if (!zzh_args.verbose and !zzh_args.vverbose) {
+        std.debug.print("Connecting to target host via SSH...\n", .{});
+        if (zzh_args.tmux) {
+            std.debug.print("Entering remote tmux session...\n", .{});
+        }
     }
 
     var child = std.process.Child.init(run_argv.items, allocator);
