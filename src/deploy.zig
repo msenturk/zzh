@@ -177,6 +177,10 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
     try common_argv.append(try allocator.dupe(u8, "-C")); // Enable SSH native compression to speed up transfer without local CPU bottleneck
     try common_argv.append(try allocator.dupe(u8, "-o"));
     try common_argv.append(try allocator.dupe(u8, "StrictHostKeyChecking=accept-new"));
+    
+    // Prevent 20-30s delay on Windows due to GSSAPI timeout
+    try common_argv.append(try allocator.dupe(u8, "-o"));
+    try common_argv.append(try allocator.dupe(u8, "GSSAPIAuthentication=no"));
 
     if (!xxh_args.verbose and !xxh_args.vverbose) {
         try common_argv.append(try allocator.dupe(u8, "-o"));
