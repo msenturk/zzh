@@ -1,5 +1,35 @@
 const std = @import("std");
 
+fn runZzh(allocator: std.mem.Allocator, args: []const []const u8) ![]const u8 {
+    var child = std.process.Child.init(args, allocator);
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Inherit;
+    try child.spawn();
+
+    var out_buf = std.ArrayList(u8).init(allocator);
+    errdefer out_buf.deinit();
+
+    var stdout_reader = child.stdout.?.reader();
+    while (true) {
+        var buf: [1024]u8 = undefined;
+        const amt = try stdout_reader.read(&buf);
+        if (amt == 0) break;
+        try out_buf.appendSlice(buf[0..amt]);
+    }
+
+    const term = try child.wait();
+    if (term != .Exited or term.Exited != 0) {
+        std.debug.print("Command failed: ", .{});
+        for (args) |arg| {
+            std.debug.print("{s} ", .{arg});
+        }
+        std.debug.print("\n", .{});
+        return error.CommandFailed;
+    }
+
+    return out_buf.toOwnedSlice();
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -37,11 +67,13 @@ pub fn main() !void {
 
     // Wait for SSH to become available
     std.debug.print("Waiting for SSH to become available...\n", .{});
-    std.time.sleep(5 * std.time.ns_per_s);
+    std.time.sleep(8 * std.time.ns_per_s);
 
     const zzh_exe = if (@import("builtin").os.tag == .windows) "zig-out/bin/zzh.exe" else "zig-out/bin/zzh";
 
-    const zzh_run = [_][]const u8{
+    // Test 1: Basic Connection E2E
+    std.debug.print("Running Test 1 (Basic Connection)...\n", .{});
+    const args1 = [_][]const u8{
         zzh_exe,
         "testuser@127.0.0.1",
         "-p", "2222",
@@ -49,33 +81,32 @@ pub fn main() !void {
         "+s", "zsh",
         "+hc", "echo E2E_SUCCESS"
     };
-
-    std.debug.print("Running zzh...\n", .{});
-    var zzh_child = std.process.Child.init(&zzh_run, allocator);
-    zzh_child.stdout_behavior = .Pipe;
-    try zzh_child.spawn();
-
-    var out_buf = std.ArrayList(u8).init(allocator);
-    defer out_buf.deinit();
-
-    var stdout_reader = zzh_child.stdout.?.reader();
-    while (true) {
-        var buf: [1024]u8 = undefined;
-        const amt = stdout_reader.read(&buf) catch break;
-        if (amt == 0) break;
-        out_buf.appendSlice(buf[0..amt]) catch break;
-    }
-
-    const term = try zzh_child.wait();
-    if (term != .Exited or term.Exited != 0) {
-        std.debug.print("zzh failed with exit code: {}\n", .{term});
+    const out1 = try runZzh(allocator, &args1);
+    defer allocator.free(out1);
+    if (std.mem.indexOf(u8, out1, "E2E_SUCCESS") == null) {
+        std.debug.print("Test 1 Failed: {s}\n", .{out1});
         std.process.exit(1);
     }
+    std.debug.print("Test 1 (Basic Connection) Passed!\n", .{});
 
-    if (std.mem.indexOf(u8, out_buf.items, "E2E_SUCCESS") != null) {
-        std.debug.print("E2E Test Passed!\n", .{});
-    } else {
-        std.debug.print("E2E Test Failed: Could not find E2E_SUCCESS in output.\n", .{});
+    // Test 2: Tmux Deployment and Session Wrapping E2E
+    std.debug.print("Running Test 2 (Tmux Deployment & Wrapping)...\n", .{});
+    const args2 = [_][]const u8{
+        zzh_exe,
+        "testuser@127.0.0.1",
+        "-p", "2222",
+        "++password", "testpass",
+        "+s", "zsh",
+        "++tmux",
+        "+hc", "tmux -V"
+    };
+    const out2 = try runZzh(allocator, &args2);
+    defer allocator.free(out2);
+    if (std.mem.indexOf(u8, out2, "tmux") == null) {
+        std.debug.print("Test 2 Failed: {s}\n", .{out2});
         std.process.exit(1);
     }
+    std.debug.print("Test 2 (Tmux Deployment & Execution) Passed!\n", .{});
+
+    std.debug.print("All E2E Tests Passed successfully!\n", .{});
 }
