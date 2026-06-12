@@ -163,7 +163,7 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
     const argv = [_][]const u8{ "tar", "-cf", archive_path, "-C", temp_build_dir, "." };
     try package.runCommand(allocator, &argv);
     const elapsed_ms = std.time.milliTimestamp() - start_time;
-    if (zzh_args.debug or zzh_args.verbose) {
+    if (zzh_args.time) {
         std.debug.print("=> Creating archive took {d} ms\n", .{ elapsed_ms });
     }
 

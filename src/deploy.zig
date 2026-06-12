@@ -483,7 +483,7 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, zzh_args: *const 
         const wait_start_time = std.time.milliTimestamp();
         const term = try child.wait();
         const elapsed_wait = std.time.milliTimestamp() - wait_start_time;
-        if (zzh_args.debug or zzh_args.verbose) {
+        if (zzh_args.time) {
             std.debug.print("=> SSH command finished in {d} ms\n", .{ elapsed_wait });
         }
 

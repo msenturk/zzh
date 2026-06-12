@@ -95,6 +95,7 @@ pub const ZzhArgs = struct {
     ssh_args: std.ArrayList([]const u8), // other unparsed ssh args
     help: bool = false, // -h, --help
     debug: bool = false, // ++debug
+    time: bool = false, // ++time
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) ZzhArgs {
@@ -334,6 +335,9 @@ pub fn parseFromSlice(allocator: std.mem.Allocator, args: []const []const u8, zz
             }
         } else if (std.mem.eql(u8, arg, "++debug") or std.mem.eql(u8, arg, "--debug")) {
             zzh_args.debug = true;
+            zzh_args.verbose = true;
+        } else if (std.mem.eql(u8, arg, "++time") or std.mem.eql(u8, arg, "--time")) {
+            zzh_args.time = true;
         } else if (std.mem.eql(u8, arg, "++pexpect-disable")) {
             zzh_args.pexpect_disable = true;
         } else if (std.mem.startsWith(u8, arg, "+")) {
