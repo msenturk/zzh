@@ -57,7 +57,7 @@ pub noinline fn buildRemoteCommand(allocator: std.mem.Allocator, zzh_args: *cons
     try cmd_buf.appendSlice(host_zzh_home);
     try cmd_buf.appendSlice("/.xxh && chmod -R +x ");
     try cmd_buf.appendSlice(host_zzh_home);
-    try cmd_buf.appendSlice("/.zzh 2>/dev/null || true && ");
+    try cmd_buf.appendSlice(" 2>/dev/null || true && ");
 
     var shell_pkg_name = std.ArrayList(u8).init(allocator);
     defer shell_pkg_name.deinit();
@@ -743,7 +743,7 @@ test "Remote Command Builder Test" {
     const cmd = try buildRemoteCommand(testing.allocator, &args);
     defer testing.allocator.free(cmd);
 
-    try testing.expectEqualStrings("mkdir -p ~/.zzh && tar -xmf - -C ~/.zzh && ln -sf .zzh ~/.zzh/.xxh && chmod -R +x ~/.zzh/.zzh 2>/dev/null || true && ~/.zzh/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -e PATH=fi8uenpoL2JpbjokUEFUSA== -e VAR1=VkFMMQ==", cmd);
+    try testing.expectEqualStrings("mkdir -p ~/.zzh && tar -xmf - -C ~/.zzh && ln -sf .zzh ~/.zzh/.xxh && chmod -R +x ~/.zzh 2>/dev/null || true && ~/.zzh/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -e PATH=fi8uenpoL2JpbjokUEFUSA== -e VAR1=VkFMMQ==", cmd);
 }
 
 test "Remote Command Builder Test - Comprehensive" {
@@ -785,7 +785,7 @@ test "Remote Command Builder Test - Comprehensive" {
 
     // Verify commands inside cmd
     try testing.expect(std.mem.indexOf(u8, cmd, "rm -rf /custom/home &&") != null);
-    try testing.expect(std.mem.indexOf(u8, cmd, "mkdir -p /custom/home && tar -xmf - -C /custom/home && ln -sf .zzh /custom/home/.xxh && chmod -R +x /custom/home/.zzh") != null);
+    try testing.expect(std.mem.indexOf(u8, cmd, "mkdir -p /custom/home && tar -xmf - -C /custom/home && ln -sf .zzh /custom/home/.xxh && chmod -R +x /custom/home") != null);
     try testing.expect(std.mem.indexOf(u8, cmd, " -e PATH=") != null);
     try testing.expect(std.mem.indexOf(u8, cmd, " -f \"script.sh\"") != null);
     try testing.expect(std.mem.indexOf(u8, cmd, " -C ZWNobyBoZWxsbw==") != null); // base64 of "echo hello"

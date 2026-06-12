@@ -270,7 +270,7 @@ pub fn downloadTmux(allocator: std.mem.Allocator, install_force: bool, local_xxh
     defer allocator.free(base_dir);
 
     const bin_dir = try std.fs.path.join(allocator, &.{ base_dir, "bin" });
-    errdefer allocator.free(bin_dir);
+    defer allocator.free(bin_dir);
     try makeDirRecursive(allocator, bin_dir);
 
     const tmux_path = try std.fs.path.join(allocator, &.{ bin_dir, "tmux" });
@@ -287,22 +287,21 @@ pub fn downloadTmux(allocator: std.mem.Allocator, install_force: bool, local_xxh
         return tmux_path;
     }
 
-    // AppImage is only for Linux x86_64 without musl; for musl/arm we try a different source
+    const TMUX_VERSION = "3.5a";
+    const url = "https://github.com/nelsonenzo/tmux-appimage/releases/download/" ++ TMUX_VERSION ++ "/tmux.appimage";
+    std.debug.print("Downloading portable tmux {s} from {s}...\n", .{ TMUX_VERSION, url });
+    
     const builtin = @import("builtin");
-    if (builtin.os.tag == .linux and builtin.cpu.arch == .x86_64) {
-        const TMUX_VERSION = "3.5a";
-        const url = "https://github.com/nelsonenzo/tmux-appimage/releases/download/" ++ TMUX_VERSION ++ "/tmux.appimage";
-        std.debug.print("Downloading portable tmux {s} from {s}...\n", .{ TMUX_VERSION, url });
-        const curl_argv = [_][]const u8{ "curl", "-fsSL", "-o", tmux_path, url };
-        try runCommand(allocator, &curl_argv);
+    const curl_cmd = if (builtin.os.tag == .windows) "curl.exe" else "curl";
+    const curl_argv = [_][]const u8{ curl_cmd, "-fsSL", "-o", tmux_path, url };
+    try runCommand(allocator, &curl_argv);
+
+    if (builtin.os.tag != .windows) {
         // Make executable
         const chmod_argv = [_][]const u8{ "chmod", "+x", tmux_path };
         try runCommand(allocator, &chmod_argv);
-        std.debug.print("tmux installed to {s}\n", .{tmux_path});
-    } else {
-        std.debug.print("Automatic tmux download is only supported for Linux x86_64.\n", .{});
-        std.debug.print("Please install tmux manually and copy the binary to {s}\n", .{tmux_path});
     }
+    std.debug.print("tmux installed to {s}\n", .{tmux_path});
 
     return tmux_path;
 }

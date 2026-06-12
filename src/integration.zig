@@ -131,7 +131,7 @@ test "Integration: Remote command generation and quoting" {
     const cmd = try deploy.buildRemoteCommand(testing.allocator, &args);
     defer testing.allocator.free(cmd);
 
-    try testing.expectEqualStrings("mkdir -p ~/.zzh && tar -xmf - -C ~/.zzh && ln -sf .zzh ~/.zzh/.xxh && chmod -R +x ~/.zzh/.zzh 2>/dev/null || true && ~/.zzh/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -e PATH=fi8uenpoL2JpbjokUEFUSA== -e A=Qg== -e C=RCBFIEY=", cmd);
+    try testing.expectEqualStrings("mkdir -p ~/.zzh && tar -xmf - -C ~/.zzh && ln -sf .zzh ~/.zzh/.xxh && chmod -R +x ~/.zzh 2>/dev/null || true && ~/.zzh/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -e PATH=fi8uenpoL2JpbjokUEFUSA== -e A=Qg== -e C=RCBFIEY=", cmd);
 }
 
 test "Integration: Host regex pattern translation and matching" {
