@@ -286,8 +286,6 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
 
         try child.spawn();
 
-        std.debug.print("Uploading payload to target host...\n", .{});
-
         // Write the tarball archive bytes to child's stdin
         var archive_file = try std.fs.openFileAbsolute(archive_path, .{});
         defer archive_file.close();
@@ -296,6 +294,7 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
         const total_size = file_stat.size;
         var uploaded_size: u64 = 0;
         var last_percent: u64 = 200;
+        var printed_header = false;
 
         var buf: [32768]u8 = undefined;
         while (true) {
@@ -304,26 +303,37 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
             try child.stdin.?.writeAll(buf[0..amt]);
             uploaded_size += amt;
 
-            if (total_size > 0) {
-                const percent = (uploaded_size * 100) / total_size;
-                if (percent != last_percent or uploaded_size == total_size) {
-                    last_percent = percent;
-                    const bar_width = 40;
-                    const filled = (uploaded_size * bar_width) / total_size;
-                    
-                    var bar_chars: [40]u8 = undefined;
-                    for (&bar_chars, 0..) |*c, i| {
-                        if (i < filled) {
-                            c.* = '=';
-                        } else if (i == filled and i < bar_width - 1) {
-                            c.* = '>';
-                        } else {
-                            c.* = ' ';
+            // The OS pipe buffer is usually 64KB. If we've written > 128KB, 
+            // SSH has definitely authenticated and is streaming data.
+            // We wait until now to print the progress bar so it doesn't 
+            // overwrite the SSH password prompt!
+            if (uploaded_size > 128 * 1024 or uploaded_size == total_size) {
+                if (!printed_header) {
+                    std.debug.print("\nUploading payload to target host...\n", .{});
+                    printed_header = true;
+                }
+
+                if (total_size > 0) {
+                    const percent = (uploaded_size * 100) / total_size;
+                    if (percent != last_percent or uploaded_size == total_size) {
+                        last_percent = percent;
+                        const bar_width = 40;
+                        const filled = (uploaded_size * bar_width) / total_size;
+                        
+                        var bar_chars: [40]u8 = undefined;
+                        for (&bar_chars, 0..) |*c, i| {
+                            if (i < filled) {
+                                c.* = '=';
+                            } else if (i == filled and i < bar_width - 1) {
+                                c.* = '>';
+                            } else {
+                                c.* = ' ';
+                            }
                         }
+                        const mb_uploaded = uploaded_size / (1024 * 1024);
+                        const mb_total = total_size / (1024 * 1024);
+                        std.debug.print("\r[{s}] {d:>3}% ({d} MB / {d} MB)", .{ bar_chars, percent, mb_uploaded, mb_total });
                     }
-                    const mb_uploaded = uploaded_size / (1024 * 1024);
-                    const mb_total = total_size / (1024 * 1024);
-                    std.debug.print("\r[{s}] {d:>3}% ({d} MB / {d} MB)", .{ bar_chars, percent, mb_uploaded, mb_total });
                 }
             }
         }
