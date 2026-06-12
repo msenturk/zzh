@@ -152,8 +152,11 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
     // Run system tar command without local gzip compression (to save CPU bottleneck).
     // We will use ssh -C to compress the transfer on the fly instead!
     std.debug.print("Creating payload archive {s}...\n", .{ archive_path });
+    const start_time = std.time.milliTimestamp();
     const argv = [_][]const u8{ "tar", "-cf", archive_path, "-C", temp_build_dir, "." };
     try package.runCommand(allocator, &argv);
+    const elapsed_ms = std.time.milliTimestamp() - start_time;
+    std.debug.print("=> Creating archive took {d} ms\n", .{ elapsed_ms });
 
     return .{
         .temp_build_dir = temp_build_dir,
