@@ -287,14 +287,18 @@ zzh +I xxh-plugin-zsh-ohmyzsh
 # Install portable tmux
 zzh +I tmux
 
-# Remove a package
+# Remove a package or static binary from cache
 zzh +R xxh-plugin-zsh-ohmyzsh
+zzh +R tmux
 
 # List installed shells
 zzh +LS
 
 # List installed plugins
 zzh +LP
+
+# List installed static binaries
+zzh +LB
 ```
 
 ### Shell Completions
@@ -322,14 +326,14 @@ use completions/zzh.nu
 | `+I <pkg>` | Install xxh package (`xxh-plugin-*`, `xxh-shell-*`, or `tmux`) |
 | `+b <repo>` | *(coming soon)* Install static binary from GitHub/GitLab releases |
 | `+d <file>` | Sync dotfile/config — symlinked to `~/` on remote |
-| `+R <pkg>` | Remove package |
+| `+R <pkg>` | Remove cached package or binary |
 | `+L` | List installed packages |
-| `+LS` / `+LP` | List installed shells / plugins |
+| `+LS` / `+LP` / `+LB` | List installed shells / plugins / static binaries |
 | `++update` | Update all cached packages via `git pull` |
 | `++tmux` | Attach to persistent tmux session (auto-downloads tmux) |
 | `++tmux-session <name>` | Tmux session name (default: `zzh`) |
 | `+hh <path>` | Remote path to deploy payload to (default: `~/.zzh`) |
-| `+hhr` | Ephemeral mode: automatically remove payload from remote after disconnect |
+| `+hhr` | Ephemeral mode: automatically remove payload from remote after disconnect (guaranteed client-side cleanup) |
 | `+if` / `+iff` | Force reinstall payload / full home |
 | `+hc <cmd>` | Execute command on remote and exit |
 | `+hf <file>` | Execute local script on remote and exit |
