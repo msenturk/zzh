@@ -243,9 +243,6 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
                 std.debug.print("Bundling tmux binary from {s} to {s}...\n", .{ local_tmux, dest_tmux });
             }
             try std.fs.copyFileAbsolute(local_tmux, dest_tmux, .{});
-        } else {
-            std.debug.print("Warning: ++tmux specified but no tmux binary found at {s}\n", .{local_tmux});
-            std.debug.print("Run: zzh +I tmux  to download and install tmux.\n", .{});
         }
     }
 

@@ -379,7 +379,15 @@ pub fn main() !void {
         }
     }
 
-    // 8. Bundle payload
+    // 8. If ++tmux, auto-download static tmux binary if not already cached locally.
+    //    downloadTmux is a no-op when ~/.zzh/bin/tmux already exists (unless +if).
+    if (merged_args.tmux) {
+        std.debug.print("Ensuring portable tmux is available locally...\n", .{});
+        const tmux_path = try package.downloadTmux(allocator, merged_args.install_force, merged_args.local_zzh_home);
+        allocator.free(tmux_path);
+    }
+
+    // 9. Bundle payload
     const bundle = try bundler.buildPayload(allocator, shell_path, plugin_paths.items, &merged_args);
     defer bundler.cleanupBundle(allocator, bundle);
 
