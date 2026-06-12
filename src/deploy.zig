@@ -51,7 +51,7 @@ pub noinline fn buildRemoteCommand(allocator: std.mem.Allocator, xxh_args: *cons
 
     try cmd_buf.appendSlice("mkdir -p ");
     try cmd_buf.appendSlice(host_xxh_home);
-    try cmd_buf.appendSlice(" && tar -xf - -C ");
+    try cmd_buf.appendSlice(" && tar -xmf - -C ");
     try cmd_buf.appendSlice(host_xxh_home);
     try cmd_buf.appendSlice(" && ");
 
