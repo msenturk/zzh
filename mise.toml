@@ -6,8 +6,24 @@ description = "Build zzh in debug mode"
 run = "zig build"
 
 [tasks.release]
-description = "Build zzh in release mode"
+description = "Build zzh in release mode (native)"
 run = "zig build -Doptimize=ReleaseSmall"
+
+[tasks.release-linux-x86_64]
+description = "Build Linux x86_64 static release binary"
+run = "zig build -Doptimize=ReleaseSmall -Dtarget=x86_64-linux-musl && (mkdir dist 2>nul || cd .) && tar -czf dist/zzh-v0.1.0-linux-x86_64.tar.gz -C zig-out/bin zzh"
+
+[tasks.release-linux-aarch64]
+description = "Build Linux aarch64 static release binary"
+run = "zig build -Doptimize=ReleaseSmall -Dtarget=aarch64-linux-musl && (mkdir dist 2>nul || cd .) && tar -czf dist/zzh-v0.1.0-linux-aarch64.tar.gz -C zig-out/bin zzh"
+
+[tasks.release-windows-x86_64]
+description = "Build Windows x86_64 release binary"
+run = "zig build -Doptimize=ReleaseSmall -Dtarget=x86_64-windows && (mkdir dist 2>nul || cd .) && tar -czf dist/zzh-v0.1.0-windows-x86_64.tar.gz -C zig-out/bin zzh.exe"
+
+[tasks.release-all]
+description = "Build and package all release targets"
+depends = ["release-linux-x86_64", "release-linux-aarch64", "release-windows-x86_64"]
 
 [tasks.test]
 description = "Run unit tests"
@@ -15,4 +31,4 @@ run = "zig build test"
 
 [tasks.clean]
 description = "Remove build artifacts and cache"
-run = "rm -rf zig-out .zig-cache"
+run = "rm -rf zig-out .zig-cache dist"
