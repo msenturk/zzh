@@ -74,7 +74,11 @@ pub noinline fn resolvePackage(allocator: std.mem.Allocator, raw_name: []const u
         };
     } else {
         const clean_name = try allocator.dupe(u8, resolved_name);
-        const git_url = try std.fmt.allocPrint(allocator, "https://github.com/xxh/{s}", .{resolved_name});
+        var url_owner: []const u8 = "xxh";
+        if (std.mem.eql(u8, resolved_name, "xxh-shell-nu")) {
+            url_owner = "msenturk";
+        }
+        const git_url = try std.fmt.allocPrint(allocator, "https://github.com/{s}/{s}", .{ url_owner, resolved_name });
         return .{
             .name = resolved_name,
             .git_url = git_url,
@@ -292,7 +296,7 @@ test "resolvePackage Test" {
     const nu5 = try resolvePackage(testing.allocator, "nushell", true);
     defer freeResolvedPackage(testing.allocator, nu5);
     try testing.expectEqualStrings("xxh-shell-nu", nu5.clean_name);
-    try testing.expectEqualStrings("https://github.com/xxh/xxh-shell-nu", nu5.git_url);
+    try testing.expectEqualStrings("https://github.com/msenturk/xxh-shell-nu", nu5.git_url);
 }
 
 const FailableAllocator = struct {

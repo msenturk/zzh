@@ -36,3 +36,4 @@ coverage/*
 
 docs/*
 xxh-original/*
+test-sshd/*
