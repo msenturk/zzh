@@ -5,6 +5,35 @@ const package = @import("package.zig");
 const bundler = @import("bundler.zig");
 const deploy = @import("deploy.zig");
 
+fn listBinaries(allocator: std.mem.Allocator, local_zzh_home: ?[]const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+    var base_dir: []const u8 = undefined;
+    if (local_zzh_home) |lh| {
+        base_dir = try config.resolvePath(allocator, lh);
+    } else {
+        const home = config.getHomeDir(allocator) orelse return error.HomeDirNotFound;
+        defer allocator.free(home);
+        base_dir = try std.fs.path.join(allocator, &.{ home, ".zzh" });
+    }
+    defer allocator.free(base_dir);
+
+    const path = try std.fs.path.join(allocator, &.{ base_dir, "bin" });
+    defer allocator.free(path);
+
+    var dir = std.fs.openDirAbsolute(path, .{ .iterate = true }) catch |err| {
+        if (err == error.FileNotFound) return;
+        return err;
+    };
+    defer dir.close();
+
+    var it = dir.iterate();
+    while (try it.next()) |entry| {
+        if (entry.kind != .directory) {
+            try stdout.print("{s}\n", .{entry.name});
+        }
+    }
+}
+
 fn listPackages(allocator: std.mem.Allocator, local_zzh_home: ?[]const u8, filter_packages: []const []const u8) !void {
     const stdout = std.io.getStdOut().writer();
     var base_dir: []const u8 = undefined;
@@ -200,6 +229,7 @@ pub fn main() !void {
         cli_args_only.has_list_zzh_packages or
         cli_args_only.list_shells or
         cli_args_only.list_plugins or
+        cli_args_only.list_binaries or
         cli_args_only.install_zzh_packages.items.len > 0 or
         cli_args_only.reinstall_zzh_packages.items.len > 0 or
         cli_args_only.remove_zzh_packages.items.len > 0 or
@@ -297,6 +327,8 @@ pub fn main() !void {
         defer allocator.free(base_dir);
 
         for (merged_args.remove_zzh_packages.items) |pkg_name| {
+            var deleted = false;
+            
             const is_shell = std.mem.indexOf(u8, pkg_name, "-shell-") != null;
             const sub_dir = if (is_shell) "shells" else "plugins";
             const resolved = try package.resolvePackage(allocator, pkg_name, is_shell);
@@ -305,8 +337,35 @@ pub fn main() !void {
             const target_dir = try std.fs.path.join(allocator, &.{ base_dir, ".zzh", sub_dir, resolved.clean_name });
             defer allocator.free(target_dir);
 
-            std.fs.deleteTreeAbsolute(target_dir) catch {};
-            std.debug.print("Removed {s}\n", .{resolved.clean_name});
+            var dir_exists = false;
+            if (std.fs.openDirAbsolute(target_dir, .{})) |d| {
+                dir_exists = true;
+                var mutable_d = d;
+                mutable_d.close();
+            } else |_| {}
+
+            if (dir_exists) {
+                std.fs.deleteTreeAbsolute(target_dir) catch {};
+                std.debug.print("Removed package {s}\n", .{resolved.clean_name});
+                deleted = true;
+            }
+
+            const bin_path = try std.fs.path.join(allocator, &.{ base_dir, "bin", pkg_name });
+            defer allocator.free(bin_path);
+            var bin_exists = false;
+            if (std.fs.accessAbsolute(bin_path, .{})) |_| {
+                bin_exists = true;
+            } else |_| {}
+
+            if (bin_exists) {
+                std.fs.deleteFileAbsolute(bin_path) catch {};
+                std.debug.print("Removed binary {s}\n", .{pkg_name});
+                deleted = true;
+            }
+
+            if (!deleted) {
+                std.debug.print("Package/binary '{s}' not found\n", .{pkg_name});
+            }
         }
         package_op_performed = true;
     }
@@ -323,6 +382,11 @@ pub fn main() !void {
 
     if (merged_args.list_plugins) {
         try listShellsOrPlugins(allocator, merged_args.local_zzh_home, "plugins");
+        return;
+    }
+
+    if (merged_args.list_binaries) {
+        try listBinaries(allocator, merged_args.local_zzh_home);
         return;
     }
 

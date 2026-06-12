@@ -73,6 +73,7 @@ pub const ZzhArgs = struct {
     remove_zzh_packages: std.ArrayList([]const u8), // +R, ++remove-zzh-packages
     list_shells: bool = false, // +LS, +list-shells
     list_plugins: bool = false, // +LP, +list-plugins
+    list_binaries: bool = false, // +LB, +list-binaries
     extract_sourcing_files: bool = false, // +ES, ++extract-sourcing-files
     update_packages: bool = false, // ++update
     
@@ -336,6 +337,8 @@ pub fn parseFromSlice(allocator: std.mem.Allocator, args: []const []const u8, zz
             zzh_args.list_shells = true;
         } else if (std.mem.eql(u8, arg, "+LP") or std.mem.eql(u8, arg, "++list-plugins") or std.mem.eql(u8, arg, "+list-plugins")) {
             zzh_args.list_plugins = true;
+        } else if (std.mem.eql(u8, arg, "+LB") or std.mem.eql(u8, arg, "++list-binaries") or std.mem.eql(u8, arg, "+list-binaries")) {
+            zzh_args.list_binaries = true;
         } else if (std.mem.eql(u8, arg, "+ES") or std.mem.eql(u8, arg, "++extract-sourcing-files")) {
             zzh_args.extract_sourcing_files = true;
         } else if (std.mem.eql(u8, arg, "++pexpect-timeout")) {
@@ -452,6 +455,7 @@ test "CLI Parsing Test - Short Forms and Core SSH Options" {
         "+R", "pkg_c",
         "+LS",
         "+LP",
+        "+LB",
         "+ES",
         "user@myhost",
         "-extra-ssh-arg",
@@ -498,6 +502,7 @@ test "CLI Parsing Test - Short Forms and Core SSH Options" {
     try testing.expectEqualStrings("pkg_c", args.remove_zzh_packages.items[0]);
     try testing.expect(args.list_shells);
     try testing.expect(args.list_plugins);
+    try testing.expect(args.list_binaries);
     try testing.expect(args.extract_sourcing_files);
     try testing.expectEqualStrings("user@myhost", args.destination.?);
     try testing.expectEqual(@as(usize, 1), args.ssh_args.items.len);

@@ -105,6 +105,16 @@ pub noinline fn buildRemoteCommand(allocator: std.mem.Allocator, zzh_args: *cons
         try cmd_buf.appendSlice(" -v 1");
     }
 
+    // Automatically prepend zzh's bin directory to the remote PATH
+    {
+        const path_val = try std.fmt.allocPrint(allocator, "{s}/bin:$PATH", .{host_zzh_home});
+        defer allocator.free(path_val);
+        const path_val_b64 = try b64Encode(allocator, path_val);
+        defer allocator.free(path_val_b64);
+        try cmd_buf.appendSlice(" -e PATH=");
+        try cmd_buf.appendSlice(path_val_b64);
+    }
+
     for (zzh_args.env.items) |e| {
         const formatted = try formatEnvVar(allocator, e, true);
         defer allocator.free(formatted);
@@ -248,11 +258,7 @@ pub noinline fn buildRemoteCommand(allocator: std.mem.Allocator, zzh_args: *cons
         try cmd_buf.appendSlice(b_b64);
     }
 
-    if (zzh_args.host_zzh_home_remove) {
-        if (zzh_args.tmux) try cmd_buf.append('\"');
-        try cmd_buf.appendSlice(" && rm -rf ");
-        try cmd_buf.appendSlice(host_zzh_home);
-    } else if (zzh_args.tmux) {
+    if (zzh_args.tmux) {
         try cmd_buf.append('\"');
     }
 
@@ -671,6 +677,42 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, zzh_args: *const 
 
     // Wait for SSH to complete
     const term = try child.wait();
+
+    if (zzh_args.host_zzh_home_remove) {
+        const host_zzh_home = zzh_args.host_zzh_home orelse "~/.zzh";
+        const clean_cmd = try std.fmt.allocPrint(allocator, "rm -rf {s}", .{host_zzh_home});
+        defer allocator.free(clean_cmd);
+
+        var clean_argv = std.ArrayList([]const u8).init(allocator);
+        defer clean_argv.deinit();
+
+        if (zzh_args.password != null and exe_path != null and builtin.os.tag != .windows) {
+            try clean_argv.append(exe_path.?);
+            try clean_argv.append("--internal-setsid");
+        }
+
+        for (common_argv.items) |arg| {
+            try clean_argv.append(arg);
+        }
+        try clean_argv.append(clean_cmd);
+
+        if (zzh_args.verbose or zzh_args.vverbose) {
+            std.debug.print("Cleaning up remote home directory with command:", .{});
+            for (clean_argv.items) |arg| {
+                std.debug.print(" {s}", .{arg});
+            }
+            std.debug.print("\n", .{});
+        }
+
+        var clean_child = std.process.Child.init(clean_argv.items, allocator);
+        clean_child.env_map = &env_map;
+        clean_child.stdin_behavior = .Ignore;
+        clean_child.stdout_behavior = .Ignore;
+        clean_child.stderr_behavior = .Ignore;
+
+        _ = clean_child.spawnAndWait() catch {};
+    }
+
     switch (term) {
         .Exited => |code| {
             if (code != 0) {
@@ -701,7 +743,7 @@ test "Remote Command Builder Test" {
     const cmd = try buildRemoteCommand(testing.allocator, &args);
     defer testing.allocator.free(cmd);
 
-    try testing.expectEqualStrings("mkdir -p ~/.zzh && tar -xmf - -C ~/.zzh && ln -sf .zzh ~/.zzh/.xxh && chmod -R +x ~/.zzh/.zzh 2>/dev/null || true && ~/.zzh/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -e VAR1=VkFMMQ==", cmd);
+    try testing.expectEqualStrings("mkdir -p ~/.zzh && tar -xmf - -C ~/.zzh && ln -sf .zzh ~/.zzh/.xxh && chmod -R +x ~/.zzh/.zzh 2>/dev/null || true && ~/.zzh/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -e PATH=fi8uenpoL2JpbjokUEFUSA== -e VAR1=VkFMMQ==", cmd);
 }
 
 test "Remote Command Builder Test - Comprehensive" {
@@ -744,6 +786,7 @@ test "Remote Command Builder Test - Comprehensive" {
     // Verify commands inside cmd
     try testing.expect(std.mem.indexOf(u8, cmd, "rm -rf /custom/home &&") != null);
     try testing.expect(std.mem.indexOf(u8, cmd, "mkdir -p /custom/home && tar -xmf - -C /custom/home && ln -sf .zzh /custom/home/.xxh && chmod -R +x /custom/home/.zzh") != null);
+    try testing.expect(std.mem.indexOf(u8, cmd, " -e PATH=") != null);
     try testing.expect(std.mem.indexOf(u8, cmd, " -f \"script.sh\"") != null);
     try testing.expect(std.mem.indexOf(u8, cmd, " -C ZWNobyBoZWxsbw==") != null); // base64 of "echo hello"
     try testing.expect(std.mem.indexOf(u8, cmd, " -v 2") != null);
@@ -755,7 +798,7 @@ test "Remote Command Builder Test - Comprehensive" {
     try testing.expect(std.mem.indexOf(u8, cmd, " -H /host/home") != null);
     try testing.expect(std.mem.indexOf(u8, cmd, " -X /xdg/config") != null);
     try testing.expect(std.mem.indexOf(u8, cmd, " -b YmFzaF9jbWQ=") != null); // base64 of "bash_cmd"
-    try testing.expect(std.mem.indexOf(u8, cmd, " && rm -rf /custom/home") != null);
+    try testing.expect(std.mem.indexOf(u8, cmd, " && rm -rf /custom/home") == null);
 }
 
 test "Remote Command Builder Test - install_force" {
@@ -960,7 +1003,7 @@ test "Deploy and Connect Mock Test - Step 1 Signal Failure" {
 
     args.ssh_command = try testing.allocator.dupe(u8, mock_ssh_path);
 
-    const res = deployAndConnect(testing.allocator, &args, archive_path);
+    const res = deployAndConnect(testing.allocator, &args, archive_path, sub_path);
     try testing.expectError(error.DeploymentTerminated, res);
 }
 
@@ -1018,5 +1061,5 @@ test "Deploy and Connect Mock Test - Step 2 Signal Failure" {
     args.ssh_command = try testing.allocator.dupe(u8, mock_ssh_path);
 
     // Should complete without error even if step 2 gets a signal (since step 2 logs it but doesn't propagate error)
-    try deployAndConnect(testing.allocator, &args, archive_path);
+    try deployAndConnect(testing.allocator, &args, archive_path, sub_path);
 }
