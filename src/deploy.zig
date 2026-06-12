@@ -137,7 +137,13 @@ pub noinline fn buildRemoteCommand(allocator: std.mem.Allocator, zzh_args: *cons
 
     for (zzh_args.dotfiles.items) |d| {
         const basename = std.fs.path.basename(d);
-        const ln_cmd = try std.fmt.allocPrint(allocator, "ln -sf $XXH_HOME/.zzh/dotfiles/{s} ~/{s}", .{ basename, basename });
+        // Safe symlink:
+        // - If already correctly symlinked: no-op
+        // - If real file or dir: back up as <name>.zzh-bak, then symlink
+        // - If broken/wrong symlink: replace
+        const ln_cmd = try std.fmt.allocPrint(allocator,
+            \\_zzh_src="$XXH_HOME/.zzh/dotfiles/{s}"; _zzh_dst=~/{s}; if [ -L "$_zzh_dst" ] && [ "$(readlink "$_zzh_dst")" = "$_zzh_src" ]; then : ; elif [ -e "$_zzh_dst" ] && [ ! -L "$_zzh_dst" ]; then mv "$_zzh_dst" "$_zzh_dst.zzh-bak" && ln -sf "$_zzh_src" "$_zzh_dst"; else ln -sf "$_zzh_src" "$_zzh_dst"; fi
+        , .{ basename, basename });
         defer allocator.free(ln_cmd);
         const b_b64 = try b64Encode(allocator, ln_cmd);
         defer allocator.free(b_b64);
