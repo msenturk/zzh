@@ -281,6 +281,8 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
                 std.debug.print(" {s}", .{arg});
             }
             std.debug.print("\n", .{});
+        } else {
+            std.debug.print("Connecting to target host via SSH...\n", .{});
         }
 
         var child = std.process.Child.init(deploy_argv.items, allocator);
