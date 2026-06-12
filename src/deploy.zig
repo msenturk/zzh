@@ -145,6 +145,8 @@ pub noinline fn buildRemoteCommand(allocator: std.mem.Allocator, zzh_args: *cons
         defer allocator.free(joined_basenames);
 
         const script = try std.fmt.allocPrint(allocator,
+            \\if diff -y /dev/null /dev/null >/dev/null 2>&1; then _zzh_has_y=1; else _zzh_has_y=0; fi;
+            \\if diff -u /dev/null /dev/null >/dev/null 2>&1; then _zzh_has_u=1; else _zzh_has_u=0; fi;
             \\_zzh_current="{s}";
             \\for link in ~/.* ~/*; do
             \\  [ ! -L "$link" ] && continue;
@@ -188,14 +190,26 @@ pub noinline fn buildRemoteCommand(allocator: std.mem.Allocator, zzh_args: *cons
             \\      if ! cmp -s "$_zzh_dst" "$_zzh_src"; then
             \\        differ=1;
             \\        echo "--- Diff for $basename (Remote vs Local) ---";
-            \\        diff -u "$_zzh_dst" "$_zzh_src" 2>/dev/null; [ $? -eq 2 ] && diff "$_zzh_dst" "$_zzh_src";
+            \\        if [ "$_zzh_has_y" -eq 1 ]; then
+            \\          diff -y "$_zzh_dst" "$_zzh_src";
+            \\        elif [ "$_zzh_has_u" -eq 1 ]; then
+            \\          diff -u "$_zzh_dst" "$_zzh_src";
+            \\        else
+            \\          diff "$_zzh_dst" "$_zzh_src";
+            \\        fi;
             \\        echo "--------------------------------------------";
             \\      fi;
             \\    elif [ -d "$_zzh_dst" ] && [ -d "$_zzh_src" ]; then
             \\      if ! diff -r "$_zzh_dst" "$_zzh_src" >/dev/null 2>&1; then
             \\        differ=1;
             \\        echo "--- Diff for $basename (Remote vs Local) ---";
-            \\        diff -ru "$_zzh_dst" "$_zzh_src" 2>/dev/null; [ $? -eq 2 ] && diff -r "$_zzh_dst" "$_zzh_src";
+            \\        if [ "$_zzh_has_y" -eq 1 ]; then
+            \\          diff -ry "$_zzh_dst" "$_zzh_src";
+            \\        elif [ "$_zzh_has_u" -eq 1 ]; then
+            \\          diff -ru "$_zzh_dst" "$_zzh_src";
+            \\        else
+            \\          diff -r "$_zzh_dst" "$_zzh_src";
+            \\        fi;
             \\        echo "--------------------------------------------";
             \\      fi;
             \\    else
