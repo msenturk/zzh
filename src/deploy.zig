@@ -215,6 +215,16 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
         try common_argv.append(try allocator.dupe(u8, o));
     }
 
+    const builtin = @import("builtin");
+    if (builtin.os.tag != .windows) {
+        try common_argv.append(try allocator.dupe(u8, "-o"));
+        try common_argv.append(try allocator.dupe(u8, "ControlMaster=auto"));
+        try common_argv.append(try allocator.dupe(u8, "-o"));
+        try common_argv.append(try allocator.dupe(u8, "ControlPath=/tmp/zzh_mux_%h_%p_%r"));
+        try common_argv.append(try allocator.dupe(u8, "-o"));
+        try common_argv.append(try allocator.dupe(u8, "ControlPersist=5m"));
+    }
+
     for (xxh_args.ssh_args.items) |arg| {
         try common_argv.append(try allocator.dupe(u8, arg));
     }
@@ -224,10 +234,37 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
         try common_argv.append(try allocator.dupe(u8, dest_info.host));
     }
 
+    var env_map = try std.process.getEnvMap(allocator);
+    defer env_map.deinit();
+
+    var exe_path: ?[]const u8 = null;
+    defer {
+        if (exe_path) |p| allocator.free(p);
+    }
+
+    if (xxh_args.password) |pwd| {
+        exe_path = std.fs.selfExePathAlloc(allocator) catch null;
+        if (exe_path) |p| {
+            try env_map.put("SSH_ASKPASS", p);
+            try env_map.put("SSH_ASKPASS_REQUIRE", "force");
+            try env_map.put("DISPLAY", "dummy:0");
+            try env_map.put("ZZH_INTERNAL_ASKPASS", "1");
+            try env_map.put("ZZH_INTERNAL_PASSWORD", pwd);
+        } else {
+            std.debug.print("Warning: Could not get self executable path for SSH_ASKPASS.\n", .{});
+        }
+    }
+
     // Step 1: Deploy the payload if deployment is needed
     if (deploy_cmd) |d_cmd| {
         var deploy_argv = std.ArrayList([]const u8).init(allocator);
         defer deploy_argv.deinit();
+
+        if (xxh_args.password != null and exe_path != null and builtin.os.tag != .windows) {
+            try deploy_argv.append(try allocator.dupe(u8, exe_path.?));
+            try deploy_argv.append(try allocator.dupe(u8, "--internal-setsid"));
+        }
+
         for (common_argv.items) |arg| {
             try deploy_argv.append(arg);
         }
@@ -242,6 +279,7 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
         }
 
         var child = std.process.Child.init(deploy_argv.items, allocator);
+        child.env_map = &env_map;
         child.stdin_behavior = .Pipe;
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
@@ -295,18 +333,12 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
     }
 
     var child = std.process.Child.init(run_argv.items, allocator);
-    child.stdin_behavior = .Pipe;
+    child.env_map = &env_map;
+    child.stdin_behavior = .Inherit;
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
 
     try child.spawn();
-
-    // Start stdin forwarding in background thread
-    var thread = try std.Thread.spawn(.{}, forwardStdin, .{
-        child.stdin.?,
-        std.io.getStdIn(),
-    });
-    thread.detach();
 
     // Wait for SSH to complete
     const term = try child.wait();

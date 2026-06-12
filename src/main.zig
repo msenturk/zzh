@@ -84,6 +84,56 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
+    var args_it_initial = try std.process.argsWithAllocator(allocator);
+    _ = args_it_initial.next(); // skip exe name
+    if (args_it_initial.next()) |first_arg| {
+        if (std.mem.eql(u8, first_arg, "--internal-setsid")) {
+            const builtin = @import("builtin");
+            if (builtin.os.tag == .linux) {
+                _ = std.os.linux.syscall0(.setsid);
+            } else if (builtin.os.tag != .windows) {
+                const posix_setsid = struct {
+                    extern "c" fn setsid() i32;
+                }.setsid;
+                _ = posix_setsid();
+            }
+
+            var exec_argv = std.ArrayList([]const u8).init(allocator);
+            defer exec_argv.deinit();
+
+            while (args_it_initial.next()) |arg| {
+                try exec_argv.append(try allocator.dupe(u8, arg));
+            }
+
+            if (exec_argv.items.len > 0) {
+                if (builtin.os.tag != .windows) {
+                    return std.process.execv(allocator, exec_argv.items);
+                } else {
+                    unreachable;
+                }
+            } else {
+                std.process.exit(1);
+            }
+        }
+    }
+    args_it_initial.deinit();
+
+    // Check if we are being invoked as an internal SSH_ASKPASS provider
+    if (std.process.getEnvVarOwned(allocator, "ZZH_INTERNAL_ASKPASS")) |askpass| {
+        defer allocator.free(askpass);
+        if (std.mem.eql(u8, askpass, "1")) {
+            if (std.process.getEnvVarOwned(allocator, "ZZH_INTERNAL_PASSWORD")) |pwd| {
+                defer allocator.free(pwd);
+                const stdout = std.io.getStdOut().writer();
+                stdout.writeAll(pwd) catch {};
+                stdout.writeAll("\n") catch {};
+                std.process.exit(0);
+            } else |_| {
+                std.process.exit(1);
+            }
+        }
+    } else |_| {}
+
     // 1. Parse CLI arguments first to locate the target host and config path
     var cli_args_only = try cli.parseArgs(allocator);
     defer cli_args_only.deinit();
