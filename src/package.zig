@@ -74,11 +74,14 @@ pub noinline fn resolvePackage(allocator: std.mem.Allocator, raw_name: []const u
         };
     } else {
         const clean_name = try allocator.dupe(u8, resolved_name);
-        var url_owner: []const u8 = "xxh";
+        
+        var git_url: []const u8 = undefined;
         if (std.mem.eql(u8, resolved_name, "xxh-shell-nu")) {
-            url_owner = "msenturk";
+            git_url = try allocator.dupe(u8, "https://github.com/msenturk/zzh/tree/main/shells/xxh-shell-nu");
+        } else {
+            git_url = try std.fmt.allocPrint(allocator, "https://github.com/xxh/{s}", .{resolved_name});
         }
-        const git_url = try std.fmt.allocPrint(allocator, "https://github.com/{s}/{s}", .{ url_owner, resolved_name });
+        
         return .{
             .name = resolved_name,
             .git_url = git_url,
@@ -203,10 +206,48 @@ pub fn downloadAndCachePackage(allocator: std.mem.Allocator, pkg: ResolvedPackag
             std.debug.print("Downloading official Nushell plugin '{s}' from Nushell releases...\n", .{plugin_suffix});
             try downloadOfficialNuPlugin(allocator, plugin_suffix, target_dir);
         } else {
-            // Run git clone --depth=1 <git_url> <target_dir>
-            std.debug.print("Downloading {s} from {s}...\n", .{ pkg.clean_name, pkg.git_url });
-            const argv = [_][]const u8{ "git", "clone", "--depth=1", pkg.git_url, target_dir };
-            try runCommand(allocator, &argv);
+            if (std.mem.indexOf(u8, pkg.git_url, "/tree/")) |tree_idx| {
+                const repo_url = pkg.git_url[0..tree_idx];
+                const rest = pkg.git_url[tree_idx + 6 ..];
+                if (std.mem.indexOf(u8, rest, "/")) |slash_idx| {
+                    const branch = rest[0..slash_idx];
+                    const subfolder = rest[slash_idx + 1 ..];
+
+                    std.debug.print("Downloading {s} from {s} (branch: {s}, folder: {s})...\n", .{ pkg.clean_name, repo_url, branch, subfolder });
+                    
+                    const tmp_target_dir = try std.fmt.allocPrint(allocator, "{s}_tmp", .{target_dir});
+                    defer allocator.free(tmp_target_dir);
+
+                    // 1. Partial clone
+                    const argv1 = [_][]const u8{ "git", "clone", "--no-checkout", "--depth=1", "--filter=tree:0", "-b", branch, repo_url, tmp_target_dir };
+                    try runCommand(allocator, &argv1);
+
+                    // 2. Sparse checkout
+                    const argv2 = [_][]const u8{ "git", "-C", tmp_target_dir, "sparse-checkout", "set", "--no-cone", subfolder };
+                    try runCommand(allocator, &argv2);
+
+                    // 3. Checkout
+                    const argv3 = [_][]const u8{ "git", "-C", tmp_target_dir, "checkout" };
+                    try runCommand(allocator, &argv3);
+
+                    // 4. Move subfolder to actual target_dir
+                    const extracted_folder = try std.fs.path.join(allocator, &.{ tmp_target_dir, subfolder });
+                    defer allocator.free(extracted_folder);
+
+                    try std.fs.renameAbsolute(extracted_folder, target_dir);
+
+                    // 5. Cleanup
+                    std.fs.deleteTreeAbsolute(tmp_target_dir) catch {};
+                } else {
+                    std.debug.print("Invalid tree URL format: {s}\n", .{pkg.git_url});
+                    return error.InvalidUrl;
+                }
+            } else {
+                // Standard git clone
+                std.debug.print("Downloading {s} from {s}...\n", .{ pkg.clean_name, pkg.git_url });
+                const argv = [_][]const u8{ "git", "clone", "--depth=1", pkg.git_url, target_dir };
+                try runCommand(allocator, &argv);
+            }
         }
     }
 
@@ -296,7 +337,7 @@ test "resolvePackage Test" {
     const nu5 = try resolvePackage(testing.allocator, "nushell", true);
     defer freeResolvedPackage(testing.allocator, nu5);
     try testing.expectEqualStrings("xxh-shell-nu", nu5.clean_name);
-    try testing.expectEqualStrings("https://github.com/msenturk/xxh-shell-nu", nu5.git_url);
+    try testing.expectEqualStrings("https://github.com/msenturk/zzh/tree/main/shells/xxh-shell-nu", nu5.git_url);
 }
 
 const FailableAllocator = struct {
