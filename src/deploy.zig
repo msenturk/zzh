@@ -135,17 +135,85 @@ pub noinline fn buildRemoteCommand(allocator: std.mem.Allocator, zzh_args: *cons
         try cmd_buf.appendSlice(b_b64);
     }
 
-    for (zzh_args.dotfiles.items) |d| {
-        const basename = std.fs.path.basename(d);
-        // Safe symlink:
-        // - If already correctly symlinked: no-op
-        // - If real file or dir: back up as <name>.zzh-bak, then symlink
-        // - If broken/wrong symlink: replace
-        const ln_cmd = try std.fmt.allocPrint(allocator,
-            \\_zzh_src="$XXH_HOME/.zzh/dotfiles/{s}"; _zzh_dst=~/{s}; if [ -L "$_zzh_dst" ] && [ "$(readlink "$_zzh_dst")" = "$_zzh_src" ]; then : ; elif [ -e "$_zzh_dst" ] && [ ! -L "$_zzh_dst" ]; then mv "$_zzh_dst" "$_zzh_dst.zzh-bak" && ln -sf "$_zzh_src" "$_zzh_dst"; else ln -sf "$_zzh_src" "$_zzh_dst"; fi
-        , .{ basename, basename });
-        defer allocator.free(ln_cmd);
-        const b_b64 = try b64Encode(allocator, ln_cmd);
+    if (zzh_args.dotfiles.items.len > 0) {
+        var basenames = std.ArrayList([]const u8).init(allocator);
+        defer basenames.deinit();
+        for (zzh_args.dotfiles.items) |d| {
+            try basenames.append(std.fs.path.basename(d));
+        }
+        const joined_basenames = try std.mem.join(allocator, " ", basenames.items);
+        defer allocator.free(joined_basenames);
+
+        const script = try std.fmt.allocPrint(allocator,
+            \\_zzh_current="{s}";
+            \\for link in ~/.* ~/*; do
+            \\  [ ! -L "$link" ] && continue;
+            \\  basename=$(basename "$link");
+            \\  [ "$basename" = "." ] && continue;
+            \\  [ "$basename" = ".." ] && continue;
+            \\  target=$(readlink "$link");
+            \\  case "$target" in
+            \\    "$XXH_HOME/.zzh/dotfiles/"*)
+            \\      is_current=0;
+            \\      for curr in $_zzh_current; do
+            \\        if [ "$curr" = "$basename" ]; then
+            \\          is_current=1;
+            \\          break;
+            \\        fi;
+            \\      done;
+            \\      if [ "$is_current" -eq 0 ]; then
+            \\        echo "Removing obsolete zzh dotfile: $link";
+            \\        rm -f "$link";
+            \\        if [ -e "$link.zzh-bak" ]; then
+            \\          echo "Restoring backup: $link.zzh-bak -> $link";
+            \\          mv "$link.zzh-bak" "$link";
+            \\        fi;
+            \\      fi;
+            \\      ;;
+            \\  esac;
+            \\done;
+            \\for basename in $_zzh_current; do
+            \\  _zzh_src="$XXH_HOME/.zzh/dotfiles/$basename";
+            \\  _zzh_dst="~/$basename";
+            \\  _zzh_dst=$(eval echo "$_zzh_dst");
+            \\  if [ -L "$_zzh_dst" ]; then
+            \\    target=$(readlink "$_zzh_dst");
+            \\    if [ "$target" != "$_zzh_src" ]; then
+            \\      rm -f "$_zzh_dst";
+            \\      ln -sf "$_zzh_src" "$_zzh_dst";
+            \\    fi;
+            \\  elif [ -e "$_zzh_dst" ]; then
+            \\    differ=0;
+            \\    if [ -f "$_zzh_dst" ] && [ -f "$_zzh_src" ]; then
+            \\      if ! cmp -s "$_zzh_dst" "$_zzh_src"; then
+            \\        differ=1;
+            \\        echo "--- Diff for $basename (Remote vs Local) ---";
+            \\        diff -u "$_zzh_dst" "$_zzh_src" 2>/dev/null; [ $? -eq 2 ] && diff "$_zzh_dst" "$_zzh_src";
+            \\        echo "--------------------------------------------";
+            \\      fi;
+            \\    elif [ -d "$_zzh_dst" ] && [ -d "$_zzh_src" ]; then
+            \\      if ! diff -r "$_zzh_dst" "$_zzh_src" >/dev/null 2>&1; then
+            \\        differ=1;
+            \\        echo "--- Diff for $basename (Remote vs Local) ---";
+            \\        diff -ru "$_zzh_dst" "$_zzh_src" 2>/dev/null; [ $? -eq 2 ] && diff -r "$_zzh_dst" "$_zzh_src";
+            \\        echo "--------------------------------------------";
+            \\      fi;
+            \\    else
+            \\      differ=1;
+            \\    fi;
+            \\    if [ "$differ" -eq 1 ]; then
+            \\      mv "$_zzh_dst" "$_zzh_dst.zzh-bak";
+            \\    else
+            \\      rm -rf "$_zzh_dst";
+            \\    fi;
+            \\    ln -sf "$_zzh_src" "$_zzh_dst";
+            \\  else
+            \\    ln -sf "$_zzh_src" "$_zzh_dst";
+            \\  fi;
+            \\done;
+        , .{joined_basenames});
+        defer allocator.free(script);
+        const b_b64 = try b64Encode(allocator, script);
         defer allocator.free(b_b64);
         try cmd_buf.appendSlice(" -b ");
         try cmd_buf.appendSlice(b_b64);
