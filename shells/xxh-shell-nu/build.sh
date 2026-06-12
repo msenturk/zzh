@@ -25,11 +25,7 @@ tar -xzf "$TARBALL"
 mv "nu-${NU_VERSION}-x86_64-unknown-linux-musl/nu" build/bin/nu
 chmod +x build/bin/nu
 
-# Move all Nushell plugin binaries if they exist
-if ls nu-${NU_VERSION}-x86_64-unknown-linux-musl/nu_plugin_* 1>/dev/null 2>&1; then
-  mv nu-${NU_VERSION}-x86_64-unknown-linux-musl/nu_plugin_* build/bin/
-  chmod +x build/bin/nu_plugin_*
-fi
+# We skip moving the massive bundled nu_plugin_* binaries to save ~100MB of payload size!
 
 # Clean up extracted dir and tarball
 rm -rf "nu-${NU_VERSION}-x86_64-unknown-linux-musl"
