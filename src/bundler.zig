@@ -84,7 +84,7 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
     errdefer allocator.free(temp_build_dir);
 
     var archive_buf: [64]u8 = undefined;
-    const archive_name = try std.fmt.bufPrint(&archive_buf, "payload-{x}.tar", .{random_val});
+    const archive_name = try std.fmt.bufPrint(&archive_buf, "payload-{x}.tar.gz", .{random_val});
     const archive_path = try std.fs.path.join(allocator, &.{ home, ".zzh", "tmp", archive_name });
     errdefer allocator.free(archive_path);
 
@@ -145,9 +145,9 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
         try copyDirRecursive(allocator, plugin_src, dest_plugin_dir);
     }
 
-    // Run system tar command
-    std.debug.print("Creating tarball archive {s}...\n", .{ archive_path });
-    const argv = [_][]const u8{ "tar", "-cf", archive_path, "-C", temp_build_dir, "." };
+    // Run system tar command with gzip compression
+    std.debug.print("Creating compressed payload archive {s}...\n", .{ archive_path });
+    const argv = [_][]const u8{ "tar", "-czf", archive_path, "-C", temp_build_dir, "." };
     try package.runCommand(allocator, &argv);
 
     return .{
