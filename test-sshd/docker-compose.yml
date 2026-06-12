@@ -1,0 +1,9 @@
+version: '3.8'
+
+services:
+  sshd:
+    build: .
+    ports:
+      - "2222:22"
+    container_name: zzh-ubuntu-test
+    restart: unless-stopped
