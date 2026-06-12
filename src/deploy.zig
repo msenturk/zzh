@@ -202,11 +202,26 @@ pub noinline fn buildRemoteCommand(allocator: std.mem.Allocator, zzh_args: *cons
             \\      differ=1;
             \\    fi;
             \\    if [ "$differ" -eq 1 ]; then
-            \\      mv "$_zzh_dst" "$_zzh_dst.zzh-bak";
+            \\      _zzh_overwrite="y";
+            \\      if [ -c /dev/tty ] && [ -t 0 ]; then
+            \\        printf "Remote file/directory %%s differs from local. Overwrite on remote? [y/N]: " "$basename";
+            \\        read _zzh_ans < /dev/tty;
+            \\        case "$_zzh_ans" in
+            \\          [yY]|[yY][eE][sS]) _zzh_overwrite="y" ;;
+            \\          *) _zzh_overwrite="n" ;;
+            \\        esac;
+            \\      fi;
+            \\      if [ "$_zzh_overwrite" = "y" ]; then
+            \\        mv "$_zzh_dst" "$_zzh_dst.zzh-bak";
+            \\        ln -sf "$_zzh_src" "$_zzh_dst";
+            \\        echo "Updated symlink for $basename (old backed up as $basename.zzh-bak).";
+            \\      else
+            \\        echo "Skipping update for $basename, keeping remote as is.";
+            \\      fi;
             \\    else
             \\      rm -rf "$_zzh_dst";
+            \\      ln -sf "$_zzh_src" "$_zzh_dst";
             \\    fi;
-            \\    ln -sf "$_zzh_src" "$_zzh_dst";
             \\  else
             \\    ln -sf "$_zzh_src" "$_zzh_dst";
             \\  fi;
