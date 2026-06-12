@@ -313,9 +313,13 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
                     
                     var bar_chars: [40]u8 = undefined;
                     for (&bar_chars, 0..) |*c, i| {
-                        if (i < filled) c.* = '=';
-                        else if (i == filled and i < bar_width - 1) c.* = '>';
-                        else c.* = ' ';
+                        if (i < filled) {
+                            c.* = '=';
+                        } else if (i == filled and i < bar_width - 1) {
+                            c.* = '>';
+                        } else {
+                            c.* = ' ';
+                        }
                     }
                     const mb_uploaded = uploaded_size / (1024 * 1024);
                     const mb_total = total_size / (1024 * 1024);
