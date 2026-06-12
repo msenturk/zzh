@@ -34,7 +34,7 @@ test "Integration: CLI Overrides Config" {
     };
 
     // 3. Initialize final merged arguments struct
-    var final_args = cli.XxhArgs.init(testing.allocator);
+    var final_args = cli.ZzhArgs.init(testing.allocator);
     defer final_args.deinit();
 
     // 4. Step A: Parse config file args first
@@ -87,7 +87,9 @@ test "Integration: Payload Bundler layout and file copying" {
     const plugin_paths = [_][]const u8{plugin_path};
 
     // Run the bundler
-    const result = try bundler.buildPayload(testing.allocator, shell_path, &plugin_paths);
+    var dummy_args = @import("cli.zig").ZzhArgs.init(testing.allocator);
+    defer dummy_args.deinit();
+    const result = try bundler.buildPayload(testing.allocator, shell_path, &plugin_paths, &dummy_args);
     defer bundler.cleanupBundle(testing.allocator, result);
 
     // 1. Verify target directory and tarball were generated
@@ -117,7 +119,7 @@ test "Integration: Payload Bundler layout and file copying" {
 test "Integration: Remote command generation and quoting" {
     const testing = std.testing;
 
-    var args = cli.XxhArgs.init(testing.allocator);
+    var args = cli.ZzhArgs.init(testing.allocator);
     defer args.deinit();
 
     args.shell = try testing.allocator.dupe(u8, "zsh");
@@ -128,7 +130,7 @@ test "Integration: Remote command generation and quoting" {
     const cmd = try deploy.buildRemoteCommand(testing.allocator, &args);
     defer testing.allocator.free(cmd);
 
-    try testing.expectEqualStrings("mkdir -p ~/.zzh && tar -xmf - -C ~/.zzh && chmod -R +x ~/.zzh/.zzh 2>/dev/null || true && ~/.zzh/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -e A=Qg== -e C=RCBFIEY=", cmd);
+    try testing.expectEqualStrings("mkdir -p ~/.zzh && tar -xmf - -C ~/.zzh && ln -sf .zzh ~/.zzh/.xxh && chmod -R +x ~/.zzh/.zzh 2>/dev/null || true && ~/.zzh/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -e A=Qg== -e C=RCBFIEY=", cmd);
 }
 
 test "Integration: Host regex pattern translation and matching" {

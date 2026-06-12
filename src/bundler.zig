@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const package = @import("package.zig");
 const config = @import("config.zig");
+const cli = @import("cli.zig");
 
 fn dirExists(path: []const u8) bool {
     std.fs.accessAbsolute(path, .{}) catch return false;
@@ -71,14 +72,14 @@ fn runBuildScriptIfPresent(allocator: std.mem.Allocator, pkg_path: []const u8) !
     }
 }
 
-pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin_paths: []const []const u8) !BundleResult {
+pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin_paths: []const []const u8, zzh_args: *const cli.ZzhArgs) !BundleResult {
     const home = config.getHomeDir(allocator) orelse return error.HomeDirNotFound;
     defer allocator.free(home);
 
     // Create unique random names for temp dir and archive
     const random_val = std.crypto.random.int(u64);
     var name_buf: [64]u8 = undefined;
-    const temp_name = try std.fmt.bufPrint(&name_buf, "xxh-build-{x}", .{random_val});
+    const temp_name = try std.fmt.bufPrint(&name_buf, "zzh-build-{x}", .{random_val});
 
     const temp_build_dir = try std.fs.path.join(allocator, &.{ home, ".zzh", "tmp", temp_name });
     errdefer allocator.free(temp_build_dir);
@@ -119,7 +120,9 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
 
     try package.makeDirRecursive(allocator, dest_shell_dir);
 
-    std.debug.print("Copying shell from {s} to {s}...\n", .{ shell_src, dest_shell_dir });
+    if (zzh_args.debug or zzh_args.verbose) {
+        std.debug.print("Copying shell from {s} to {s}...\n", .{ shell_src, dest_shell_dir });
+    }
     try copyDirRecursive(allocator, shell_src, dest_shell_dir);
 
     // Copy plugins if any
@@ -145,18 +148,24 @@ pub fn buildPayload(allocator: std.mem.Allocator, shell_path: []const u8, plugin
 
         try package.makeDirRecursive(allocator, dest_plugin_dir);
 
-        std.debug.print("Copying plugin from {s} to {s}...\n", .{ plugin_src, dest_plugin_dir });
+        if (zzh_args.debug or zzh_args.verbose) {
+            std.debug.print("Copying plugin from {s} to {s}...\n", .{ plugin_src, dest_plugin_dir });
+        }
         try copyDirRecursive(allocator, plugin_src, dest_plugin_dir);
     }
 
     // Run system tar command without local gzip compression (to save CPU bottleneck).
     // We will use ssh -C to compress the transfer on the fly instead!
-    std.debug.print("Creating payload archive {s}...\n", .{ archive_path });
+    if (zzh_args.debug or zzh_args.verbose) {
+        std.debug.print("Creating payload archive {s}...\n", .{archive_path});
+    }
     const start_time = std.time.milliTimestamp();
     const argv = [_][]const u8{ "tar", "-cf", archive_path, "-C", temp_build_dir, "." };
     try package.runCommand(allocator, &argv);
     const elapsed_ms = std.time.milliTimestamp() - start_time;
-    std.debug.print("=> Creating archive took {d} ms\n", .{ elapsed_ms });
+    if (zzh_args.debug or zzh_args.verbose) {
+        std.debug.print("=> Creating archive took {d} ms\n", .{ elapsed_ms });
+    }
 
     return .{
         .temp_build_dir = temp_build_dir,
@@ -194,7 +203,9 @@ test "Payload Bundler Test" {
 
     const plugin_paths = [_][]const u8{plugin_path};
 
-    const result = try buildPayload(testing.allocator, shell_path, &plugin_paths);
+    var dummy_args = @import("cli.zig").ZzhArgs.init(testing.allocator);
+    defer dummy_args.deinit();
+    const result = try buildPayload(testing.allocator, shell_path, &plugin_paths, &dummy_args);
     defer cleanupBundle(testing.allocator, result);
 
     // Verify temp_build_dir contains copy of shell and plugins
@@ -239,7 +250,9 @@ test "Payload Bundler Test - with build subdirectories and build.sh" {
 
     const plugin_paths = [_][]const u8{plugin_path};
 
-    const result = try buildPayload(testing.allocator, shell_path, &plugin_paths);
+    var dummy_args = @import("cli.zig").ZzhArgs.init(testing.allocator);
+    defer dummy_args.deinit();
+    const result = try buildPayload(testing.allocator, shell_path, &plugin_paths, &dummy_args);
     defer cleanupBundle(testing.allocator, result);
 
     try testing.expect(dirExists(result.temp_build_dir));
@@ -286,6 +299,8 @@ test "Payload Bundler Test - build script failure and errdefer" {
 
     const plugin_paths = [_][]const u8{plugin_path};
 
-    const res = buildPayload(testing.allocator, shell_path, &plugin_paths);
+    var dummy_args = @import("cli.zig").ZzhArgs.init(testing.allocator);
+    defer dummy_args.deinit();
+    const res = buildPayload(testing.allocator, shell_path, &plugin_paths, &dummy_args);
     try testing.expectError(error.BuildScriptFailed, res);
 }

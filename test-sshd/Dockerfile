@@ -1,29 +1,28 @@
-FROM ubuntu:24.04
+FROM alpine:latest
 
-# Avoid user interaction during apt installation
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt-get update && apt-get install -y \
+RUN apk add --no-cache \
     openssh-server \
+    bash \
     sudo \
     curl \
     wget \
     git \
     tar \
-    unzip \
-    && rm -rf /var/lib/apt/lists/*
+    unzip
 
-RUN mkdir /var/run/sshd
+RUN ssh-keygen -A
+RUN mkdir -p /var/run/sshd
 
 # Create testuser with password "test"
-RUN useradd -rm -d /home/testuser -s /bin/bash -g root -G sudo testuser
-RUN echo 'testuser:test' | chpasswd
-RUN echo 'root:root' | chpasswd
+RUN adduser -D -s /bin/bash testuser && \
+    echo "testuser:test" | chpasswd && \
+    echo "root:root" | chpasswd && \
+    echo "testuser ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
-# Enable password auth
-RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+# Enable password auth and disable DNS
+RUN sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
 RUN sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
-RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+RUN sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config || true
 RUN echo "UseDNS no" >> /etc/ssh/sshd_config
 
 EXPOSE 22

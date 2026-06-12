@@ -34,7 +34,7 @@ pub fn parseDestination(dest: []const u8) DestinationInfo {
     };
 }
 
-pub const XxhArgs = struct {
+pub const ZzhArgs = struct {
     // xxh shell & plugins
     shell: ?[]const u8 = null,
     plugins: std.ArrayList([]const u8), // +I, ++install-plugin, ++install-zzh-packages
@@ -43,9 +43,9 @@ pub const XxhArgs = struct {
     
     // config & home paths
     config_path: ?[]const u8 = null, // +xc, ++zzh-config, ++config
-    local_xxh_home: ?[]const u8 = null, // +lh, ++local-zzh-home
-    host_xxh_home: ?[]const u8 = null, // +hh, ++host-zzh-home
-    host_xxh_home_remove: bool = false, // +hhr, ++host-zzh-home-remove
+    local_zzh_home: ?[]const u8 = null, // +lh, ++local-zzh-home
+    host_zzh_home: ?[]const u8 = null, // +hh, ++host-zzh-home
+    host_zzh_home_remove: bool = false, // +hhr, ++host-zzh-home-remove
     host_home: ?[]const u8 = null, // +hhh, ++host-home
     host_home_xdg: ?[]const u8 = null, // +hhx, ++host-home-xdg
     
@@ -65,11 +65,11 @@ pub const XxhArgs = struct {
     quiet: bool = false, // +q, ++quiet
     
     // package operations
-    install_xxh_packages: std.ArrayList([]const u8), // +I, ++install-zzh-packages
-    list_xxh_packages: std.ArrayList([]const u8), // +L, ++list-zzh-packages
-    has_list_xxh_packages: bool = false, // True if +L/++list-zzh-packages is specified
-    reinstall_xxh_packages: std.ArrayList([]const u8), // +RI, ++reinstall-zzh-packages
-    remove_xxh_packages: std.ArrayList([]const u8), // +R, ++remove-zzh-packages
+    install_zzh_packages: std.ArrayList([]const u8), // +I, ++install-zzh-packages
+    list_zzh_packages: std.ArrayList([]const u8), // +L, ++list-zzh-packages
+    has_list_zzh_packages: bool = false, // True if +L/++list-zzh-packages is specified
+    reinstall_zzh_packages: std.ArrayList([]const u8), // +RI, ++reinstall-zzh-packages
+    remove_zzh_packages: std.ArrayList([]const u8), // +R, ++remove-zzh-packages
     list_shells: bool = false, // +LS, +list-shells
     list_plugins: bool = false, // +LP, +list-plugins
     extract_sourcing_files: bool = false, // +ES, ++extract-sourcing-files
@@ -94,29 +94,30 @@ pub const XxhArgs = struct {
     destination: ?[]const u8 = null,
     ssh_args: std.ArrayList([]const u8), // other unparsed ssh args
     help: bool = false, // -h, --help
+    debug: bool = false, // ++debug
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) XxhArgs {
+    pub fn init(allocator: std.mem.Allocator) ZzhArgs {
         return .{
             .plugins = std.ArrayList([]const u8).init(allocator),
             .env = std.ArrayList([]const u8).init(allocator),
             .envb = std.ArrayList([]const u8).init(allocator),
             .host_execute_bash = std.ArrayList([]const u8).init(allocator),
-            .install_xxh_packages = std.ArrayList([]const u8).init(allocator),
-            .list_xxh_packages = std.ArrayList([]const u8).init(allocator),
-            .reinstall_xxh_packages = std.ArrayList([]const u8).init(allocator),
-            .remove_xxh_packages = std.ArrayList([]const u8).init(allocator),
+            .install_zzh_packages = std.ArrayList([]const u8).init(allocator),
+            .list_zzh_packages = std.ArrayList([]const u8).init(allocator),
+            .reinstall_zzh_packages = std.ArrayList([]const u8).init(allocator),
+            .remove_zzh_packages = std.ArrayList([]const u8).init(allocator),
             .ssh_options = std.ArrayList([]const u8).init(allocator),
             .ssh_args = std.ArrayList([]const u8).init(allocator),
             .allocator = allocator,
         };
     }
 
-    pub fn deinit(self: *XxhArgs) void {
+    pub fn deinit(self: *ZzhArgs) void {
         if (self.shell) |s| self.allocator.free(s);
         if (self.config_path) |c| self.allocator.free(c);
-        if (self.local_xxh_home) |lh| self.allocator.free(lh);
-        if (self.host_xxh_home) |hh| self.allocator.free(hh);
+        if (self.local_zzh_home) |lh| self.allocator.free(lh);
+        if (self.host_zzh_home) |hh| self.allocator.free(hh);
         if (self.host_home) |h| self.allocator.free(h);
         if (self.host_home_xdg) |hx| self.allocator.free(hx);
         if (self.host_execute_file) |f| self.allocator.free(f);
@@ -140,14 +141,14 @@ pub const XxhArgs = struct {
         self.envb.deinit();
         for (self.host_execute_bash.items) |b| self.allocator.free(b);
         self.host_execute_bash.deinit();
-        for (self.install_xxh_packages.items) |p| self.allocator.free(p);
-        self.install_xxh_packages.deinit();
-        for (self.list_xxh_packages.items) |p| self.allocator.free(p);
-        self.list_xxh_packages.deinit();
-        for (self.reinstall_xxh_packages.items) |p| self.allocator.free(p);
-        self.reinstall_xxh_packages.deinit();
-        for (self.remove_xxh_packages.items) |p| self.allocator.free(p);
-        self.remove_xxh_packages.deinit();
+        for (self.install_zzh_packages.items) |p| self.allocator.free(p);
+        self.install_zzh_packages.deinit();
+        for (self.list_zzh_packages.items) |p| self.allocator.free(p);
+        self.list_zzh_packages.deinit();
+        for (self.reinstall_zzh_packages.items) |p| self.allocator.free(p);
+        self.reinstall_zzh_packages.deinit();
+        for (self.remove_zzh_packages.items) |p| self.allocator.free(p);
+        self.remove_zzh_packages.deinit();
         for (self.ssh_options.items) |o| self.allocator.free(o);
         self.ssh_options.deinit();
         for (self.ssh_args.items) |s| self.allocator.free(s);
@@ -155,197 +156,199 @@ pub const XxhArgs = struct {
     }
 };
 
-pub fn parseFromSlice(allocator: std.mem.Allocator, args: []const []const u8, xxh_args: *XxhArgs) !void {
+pub fn parseFromSlice(allocator: std.mem.Allocator, args: []const []const u8, zzh_args: *ZzhArgs) !void {
     var i: usize = 0;
     while (i < args.len) {
         const arg = args[i];
         if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-            xxh_args.help = true;
+            zzh_args.help = true;
         } else if (std.mem.eql(u8, arg, "-p")) {
             i += 1;
             if (i < args.len) {
-                if (xxh_args.ssh_port) |v| allocator.free(v);
-                xxh_args.ssh_port = try allocator.dupe(u8, args[i]);
+                if (zzh_args.ssh_port) |v| allocator.free(v);
+                zzh_args.ssh_port = try allocator.dupe(u8, args[i]);
             }
         } else if (std.mem.eql(u8, arg, "-l")) {
             i += 1;
             if (i < args.len) {
-                if (xxh_args.ssh_login) |v| allocator.free(v);
-                xxh_args.ssh_login = try allocator.dupe(u8, args[i]);
+                if (zzh_args.ssh_login) |v| allocator.free(v);
+                zzh_args.ssh_login = try allocator.dupe(u8, args[i]);
             }
         } else if (std.mem.eql(u8, arg, "-i")) {
             i += 1;
             if (i < args.len) {
-                if (xxh_args.ssh_private_key) |v| allocator.free(v);
-                xxh_args.ssh_private_key = try allocator.dupe(u8, args[i]);
+                if (zzh_args.ssh_private_key) |v| allocator.free(v);
+                zzh_args.ssh_private_key = try allocator.dupe(u8, args[i]);
             }
         } else if (std.mem.eql(u8, arg, "-J")) {
             i += 1;
             if (i < args.len) {
-                if (xxh_args.ssh_jump_host) |v| allocator.free(v);
-                xxh_args.ssh_jump_host = try allocator.dupe(u8, args[i]);
+                if (zzh_args.ssh_jump_host) |v| allocator.free(v);
+                zzh_args.ssh_jump_host = try allocator.dupe(u8, args[i]);
             }
         } else if (std.mem.eql(u8, arg, "-o")) {
             i += 1;
             if (i < args.len) {
-                try xxh_args.ssh_options.append(try allocator.dupe(u8, args[i]));
+                try zzh_args.ssh_options.append(try allocator.dupe(u8, args[i]));
             }
         } else if (std.mem.eql(u8, arg, "+c") or std.mem.eql(u8, arg, "++ssh-command")) {
             i += 1;
             if (i < args.len) {
-                if (xxh_args.ssh_command) |v| allocator.free(v);
-                xxh_args.ssh_command = try allocator.dupe(u8, args[i]);
+                if (zzh_args.ssh_command) |v| allocator.free(v);
+                zzh_args.ssh_command = try allocator.dupe(u8, args[i]);
             }
         } else if (std.mem.eql(u8, arg, "+P") or std.mem.eql(u8, arg, "++password")) {
             i += 1;
             if (i < args.len) {
-                if (xxh_args.password) |v| allocator.free(v);
-                xxh_args.password = try allocator.dupe(u8, args[i]);
+                if (zzh_args.password) |v| allocator.free(v);
+                zzh_args.password = try allocator.dupe(u8, args[i]);
             }
         } else if (std.mem.eql(u8, arg, "+PP") or std.mem.eql(u8, arg, "++password-prompt")) {
-            xxh_args.password_prompt = true;
+            zzh_args.password_prompt = true;
         } else if (std.mem.eql(u8, arg, "+i") or std.mem.eql(u8, arg, "++install")) {
-            xxh_args.install = true;
+            zzh_args.install = true;
         } else if (std.mem.eql(u8, arg, "+if") or std.mem.eql(u8, arg, "++install-force")) {
-            xxh_args.install_force = true;
+            zzh_args.install_force = true;
         } else if (std.mem.eql(u8, arg, "+iff") or std.mem.eql(u8, arg, "++install-force-full")) {
-            xxh_args.install_force_full = true;
+            zzh_args.install_force_full = true;
         } else if (std.mem.eql(u8, arg, "+xc") or std.mem.eql(u8, arg, "++zzh-config") or std.mem.eql(u8, arg, "++config")) {
             i += 1;
             if (i < args.len) {
-                if (xxh_args.config_path) |v| allocator.free(v);
-                xxh_args.config_path = try allocator.dupe(u8, args[i]);
+                if (zzh_args.config_path) |v| allocator.free(v);
+                zzh_args.config_path = try allocator.dupe(u8, args[i]);
             }
         } else if (std.mem.eql(u8, arg, "+e") or std.mem.eql(u8, arg, "++env")) {
             i += 1;
             if (i < args.len) {
-                try xxh_args.env.append(try allocator.dupe(u8, args[i]));
+                try zzh_args.env.append(try allocator.dupe(u8, args[i]));
             }
         } else if (std.mem.eql(u8, arg, "+eb") or std.mem.eql(u8, arg, "++envb")) {
             i += 1;
             if (i < args.len) {
-                try xxh_args.envb.append(try allocator.dupe(u8, args[i]));
+                try zzh_args.envb.append(try allocator.dupe(u8, args[i]));
             }
         } else if (std.mem.eql(u8, arg, "+lh") or std.mem.eql(u8, arg, "++local-zzh-home")) {
             i += 1;
             if (i < args.len) {
-                if (xxh_args.local_xxh_home) |v| allocator.free(v);
-                xxh_args.local_xxh_home = try allocator.dupe(u8, args[i]);
+                if (zzh_args.local_zzh_home) |v| allocator.free(v);
+                zzh_args.local_zzh_home = try allocator.dupe(u8, args[i]);
             }
         } else if (std.mem.eql(u8, arg, "+hh") or std.mem.eql(u8, arg, "++host-zzh-home")) {
             i += 1;
             if (i < args.len) {
-                if (xxh_args.host_xxh_home) |v| allocator.free(v);
-                xxh_args.host_xxh_home = try allocator.dupe(u8, args[i]);
+                if (zzh_args.host_zzh_home) |v| allocator.free(v);
+                zzh_args.host_zzh_home = try allocator.dupe(u8, args[i]);
             }
         } else if (std.mem.eql(u8, arg, "+hhr") or std.mem.eql(u8, arg, "++host-zzh-home-remove")) {
-            xxh_args.host_xxh_home_remove = true;
+            zzh_args.host_zzh_home_remove = true;
         } else if (std.mem.eql(u8, arg, "+hhh") or std.mem.eql(u8, arg, "++host-home")) {
             i += 1;
             if (i < args.len) {
-                if (xxh_args.host_home) |v| allocator.free(v);
-                xxh_args.host_home = try allocator.dupe(u8, args[i]);
+                if (zzh_args.host_home) |v| allocator.free(v);
+                zzh_args.host_home = try allocator.dupe(u8, args[i]);
             }
         } else if (std.mem.eql(u8, arg, "+hhx") or std.mem.eql(u8, arg, "++host-home-xdg")) {
             i += 1;
             if (i < args.len) {
-                if (xxh_args.host_home_xdg) |v| allocator.free(v);
-                xxh_args.host_home_xdg = try allocator.dupe(u8, args[i]);
+                if (zzh_args.host_home_xdg) |v| allocator.free(v);
+                zzh_args.host_home_xdg = try allocator.dupe(u8, args[i]);
             }
         } else if (std.mem.eql(u8, arg, "+hf") or std.mem.eql(u8, arg, "++host-execute-file")) {
             i += 1;
             if (i < args.len) {
-                if (xxh_args.host_execute_file) |v| allocator.free(v);
-                xxh_args.host_execute_file = try allocator.dupe(u8, args[i]);
+                if (zzh_args.host_execute_file) |v| allocator.free(v);
+                zzh_args.host_execute_file = try allocator.dupe(u8, args[i]);
             }
         } else if (std.mem.eql(u8, arg, "+hc") or std.mem.eql(u8, arg, "++host-execute-command")) {
             i += 1;
             if (i < args.len) {
-                if (xxh_args.host_execute_command) |v| allocator.free(v);
-                xxh_args.host_execute_command = try allocator.dupe(u8, args[i]);
+                if (zzh_args.host_execute_command) |v| allocator.free(v);
+                zzh_args.host_execute_command = try allocator.dupe(u8, args[i]);
             }
         } else if (std.mem.eql(u8, arg, "+heb") or std.mem.eql(u8, arg, "++host-execute-bash")) {
             i += 1;
             if (i < args.len) {
-                try xxh_args.host_execute_bash.append(try allocator.dupe(u8, args[i]));
+                try zzh_args.host_execute_bash.append(try allocator.dupe(u8, args[i]));
             }
         } else if (std.mem.eql(u8, arg, "+s") or std.mem.eql(u8, arg, "++shell") or std.mem.eql(u8, arg, "+shell")) {
             i += 1;
             if (i < args.len) {
-                if (xxh_args.shell) |v| allocator.free(v);
-                xxh_args.shell = try allocator.dupe(u8, args[i]);
+                if (zzh_args.shell) |v| allocator.free(v);
+                zzh_args.shell = try allocator.dupe(u8, args[i]);
             }
         } else if (std.mem.eql(u8, arg, "+v") or std.mem.eql(u8, arg, "++verbose")) {
-            xxh_args.verbose = true;
+            zzh_args.verbose = true;
         } else if (std.mem.eql(u8, arg, "+vv") or std.mem.eql(u8, arg, "++vverbose")) {
-            xxh_args.vverbose = true;
+            zzh_args.vverbose = true;
         } else if (std.mem.eql(u8, arg, "+q") or std.mem.eql(u8, arg, "++quiet") or std.mem.eql(u8, arg, "+quiet")) {
-            xxh_args.quiet = true;
+            zzh_args.quiet = true;
         } else if (std.mem.eql(u8, arg, "+I") or std.mem.eql(u8, arg, "++install-zzh-packages") or std.mem.eql(u8, arg, "++install-plugin") or std.mem.eql(u8, arg, "+install-plugin")) {
             i += 1;
             if (i < args.len) {
-                try xxh_args.install_xxh_packages.append(try allocator.dupe(u8, args[i]));
-                try xxh_args.plugins.append(try allocator.dupe(u8, args[i]));
+                try zzh_args.install_zzh_packages.append(try allocator.dupe(u8, args[i]));
+                try zzh_args.plugins.append(try allocator.dupe(u8, args[i]));
             }
         } else if (std.mem.eql(u8, arg, "+L") or std.mem.eql(u8, arg, "++list-zzh-packages")) {
-            xxh_args.has_list_xxh_packages = true;
+            zzh_args.has_list_zzh_packages = true;
             while (i + 1 < args.len) {
                 const next_arg = args[i + 1];
                 if (std.mem.startsWith(u8, next_arg, "+") or std.mem.startsWith(u8, next_arg, "-")) {
                     break;
                 }
                 i += 1;
-                try xxh_args.list_xxh_packages.append(try allocator.dupe(u8, args[i]));
+                try zzh_args.list_zzh_packages.append(try allocator.dupe(u8, args[i]));
             }
         } else if (std.mem.eql(u8, arg, "+RI") or std.mem.eql(u8, arg, "++reinstall-zzh-packages")) {
             i += 1;
             if (i < args.len) {
-                try xxh_args.reinstall_xxh_packages.append(try allocator.dupe(u8, args[i]));
+                try zzh_args.reinstall_zzh_packages.append(try allocator.dupe(u8, args[i]));
             }
         } else if (std.mem.eql(u8, arg, "+R") or std.mem.eql(u8, arg, "++remove-zzh-packages")) {
             i += 1;
             if (i < args.len) {
-                try xxh_args.remove_xxh_packages.append(try allocator.dupe(u8, args[i]));
+                try zzh_args.remove_zzh_packages.append(try allocator.dupe(u8, args[i]));
             }
         } else if (std.mem.eql(u8, arg, "+LS") or std.mem.eql(u8, arg, "++list-shells") or std.mem.eql(u8, arg, "+list-shells")) {
-            xxh_args.list_shells = true;
+            zzh_args.list_shells = true;
         } else if (std.mem.eql(u8, arg, "+LP") or std.mem.eql(u8, arg, "++list-plugins") or std.mem.eql(u8, arg, "+list-plugins")) {
-            xxh_args.list_plugins = true;
+            zzh_args.list_plugins = true;
         } else if (std.mem.eql(u8, arg, "+ES") or std.mem.eql(u8, arg, "++extract-sourcing-files")) {
-            xxh_args.extract_sourcing_files = true;
+            zzh_args.extract_sourcing_files = true;
         } else if (std.mem.eql(u8, arg, "++pexpect-timeout")) {
             i += 1;
             if (i < args.len) {
-                if (xxh_args.pexpect_timeout) |v| allocator.free(v);
-                xxh_args.pexpect_timeout = try allocator.dupe(u8, args[i]);
+                if (zzh_args.pexpect_timeout) |v| allocator.free(v);
+                zzh_args.pexpect_timeout = try allocator.dupe(u8, args[i]);
             }
         } else if (std.mem.eql(u8, arg, "++copy-method")) {
             i += 1;
             if (i < args.len) {
-                if (xxh_args.copy_method) |v| allocator.free(v);
-                xxh_args.copy_method = try allocator.dupe(u8, args[i]);
+                if (zzh_args.copy_method) |v| allocator.free(v);
+                zzh_args.copy_method = try allocator.dupe(u8, args[i]);
             }
         } else if (std.mem.eql(u8, arg, "++scp-command")) {
             i += 1;
             if (i < args.len) {
-                if (xxh_args.scp_command) |v| allocator.free(v);
-                xxh_args.scp_command = try allocator.dupe(u8, args[i]);
+                if (zzh_args.scp_command) |v| allocator.free(v);
+                zzh_args.scp_command = try allocator.dupe(u8, args[i]);
             }
+        } else if (std.mem.eql(u8, arg, "++debug") or std.mem.eql(u8, arg, "--debug")) {
+            zzh_args.debug = true;
         } else if (std.mem.eql(u8, arg, "++pexpect-disable")) {
-            xxh_args.pexpect_disable = true;
+            zzh_args.pexpect_disable = true;
         } else if (std.mem.startsWith(u8, arg, "+")) {
             // Unrecognized + argument, ignore
         } else if (std.mem.startsWith(u8, arg, "-")) {
             // Unrecognized ssh option or flag.
             // Check if this option takes an argument and consume it as well.
-            try xxh_args.ssh_args.append(try allocator.dupe(u8, arg));
+            try zzh_args.ssh_args.append(try allocator.dupe(u8, arg));
             if (arg.len == 2) {
                 const opt = arg[1];
                 switch (opt) {
                     'b', 'c', 'D', 'E', 'e', 'F', 'i', 'J', 'L', 'l', 'm', 'O', 'o', 'p', 'Q', 'R', 'S', 'W', 'w' => {
                         i += 1;
                         if (i < args.len) {
-                            try xxh_args.ssh_args.append(try allocator.dupe(u8, args[i]));
+                            try zzh_args.ssh_args.append(try allocator.dupe(u8, args[i]));
                         }
                     },
                     else => {},
@@ -353,19 +356,19 @@ pub fn parseFromSlice(allocator: std.mem.Allocator, args: []const []const u8, xx
             }
         } else {
             // Positional argument
-            if (xxh_args.destination == null) {
-                xxh_args.destination = try allocator.dupe(u8, arg);
+            if (zzh_args.destination == null) {
+                zzh_args.destination = try allocator.dupe(u8, arg);
             } else {
-                try xxh_args.ssh_args.append(try allocator.dupe(u8, arg));
+                try zzh_args.ssh_args.append(try allocator.dupe(u8, arg));
             }
         }
         i += 1;
     }
 }
 
-pub fn parseArgs(allocator: std.mem.Allocator) !XxhArgs {
-    var xxh_args = XxhArgs.init(allocator);
-    errdefer xxh_args.deinit();
+pub fn parseArgs(allocator: std.mem.Allocator) !ZzhArgs {
+    var zzh_args = ZzhArgs.init(allocator);
+    errdefer zzh_args.deinit();
 
     var args_it = try std.process.argsWithAllocator(allocator);
     defer args_it.deinit();
@@ -380,13 +383,13 @@ pub fn parseArgs(allocator: std.mem.Allocator) !XxhArgs {
         try list.append(arg);
     }
 
-    try parseFromSlice(allocator, list.items, &xxh_args);
-    return xxh_args;
+    try parseFromSlice(allocator, list.items, &zzh_args);
+    return zzh_args;
 }
 
 test "CLI Parsing Test - Short Forms and Core SSH Options" {
     const testing = std.testing;
-    var args = XxhArgs.init(testing.allocator);
+    var args = ZzhArgs.init(testing.allocator);
     defer args.deinit();
 
     const cli_args = [_][]const u8{
@@ -447,9 +450,9 @@ test "CLI Parsing Test - Short Forms and Core SSH Options" {
     try testing.expectEqualStrings("ENV_VAR1=val1", args.env.items[0]);
     try testing.expectEqual(@as(usize, 1), args.envb.items.len);
     try testing.expectEqualStrings("ENV_VAR2=val2_b64", args.envb.items[0]);
-    try testing.expectEqualStrings("/local/home", args.local_xxh_home.?);
-    try testing.expectEqualStrings("/host/home", args.host_xxh_home.?);
-    try testing.expect(args.host_xxh_home_remove);
+    try testing.expectEqualStrings("/local/home", args.local_zzh_home.?);
+    try testing.expectEqualStrings("/host/home", args.host_zzh_home.?);
+    try testing.expect(args.host_zzh_home_remove);
     try testing.expectEqualStrings("/user/home", args.host_home.?);
     try testing.expectEqualStrings("/xdg/config", args.host_home_xdg.?);
     try testing.expectEqualStrings("script.sh", args.host_execute_file.?);
@@ -460,12 +463,12 @@ test "CLI Parsing Test - Short Forms and Core SSH Options" {
     try testing.expect(args.verbose);
     try testing.expect(args.vverbose);
     try testing.expect(args.quiet);
-    try testing.expectEqual(@as(usize, 1), args.install_xxh_packages.items.len);
-    try testing.expectEqualStrings("pkg_a", args.install_xxh_packages.items[0]);
-    try testing.expectEqual(@as(usize, 1), args.reinstall_xxh_packages.items.len);
-    try testing.expectEqualStrings("pkg_b", args.reinstall_xxh_packages.items[0]);
-    try testing.expectEqual(@as(usize, 1), args.remove_xxh_packages.items.len);
-    try testing.expectEqualStrings("pkg_c", args.remove_xxh_packages.items[0]);
+    try testing.expectEqual(@as(usize, 1), args.install_zzh_packages.items.len);
+    try testing.expectEqualStrings("pkg_a", args.install_zzh_packages.items[0]);
+    try testing.expectEqual(@as(usize, 1), args.reinstall_zzh_packages.items.len);
+    try testing.expectEqualStrings("pkg_b", args.reinstall_zzh_packages.items[0]);
+    try testing.expectEqual(@as(usize, 1), args.remove_zzh_packages.items.len);
+    try testing.expectEqualStrings("pkg_c", args.remove_zzh_packages.items[0]);
     try testing.expect(args.list_shells);
     try testing.expect(args.list_plugins);
     try testing.expect(args.extract_sourcing_files);
@@ -476,7 +479,7 @@ test "CLI Parsing Test - Short Forms and Core SSH Options" {
 
 test "CLI Parsing Test - Long Forms and Other Options" {
     const testing = std.testing;
-    var args = XxhArgs.init(testing.allocator);
+    var args = ZzhArgs.init(testing.allocator);
     defer args.deinit();
 
     const cli_args = [_][]const u8{
@@ -528,9 +531,9 @@ test "CLI Parsing Test - Long Forms and Other Options" {
     try testing.expectEqualStrings("ENV_VAR1=val1_long", args.env.items[0]);
     try testing.expectEqual(@as(usize, 1), args.envb.items.len);
     try testing.expectEqualStrings("ENV_VAR2=val2_b64_long", args.envb.items[0]);
-    try testing.expectEqualStrings("/local/home/long", args.local_xxh_home.?);
-    try testing.expectEqualStrings("/host/home/long", args.host_xxh_home.?);
-    try testing.expect(args.host_xxh_home_remove);
+    try testing.expectEqualStrings("/local/home/long", args.local_zzh_home.?);
+    try testing.expectEqualStrings("/host/home/long", args.host_zzh_home.?);
+    try testing.expect(args.host_zzh_home_remove);
     try testing.expectEqualStrings("/user/home/long", args.host_home.?);
     try testing.expectEqualStrings("/xdg/config/long", args.host_home_xdg.?);
     try testing.expectEqualStrings("script_long.sh", args.host_execute_file.?);
@@ -541,16 +544,16 @@ test "CLI Parsing Test - Long Forms and Other Options" {
     try testing.expect(args.verbose);
     try testing.expect(args.vverbose);
     try testing.expect(args.quiet);
-    try testing.expectEqual(@as(usize, 1), args.install_xxh_packages.items.len);
-    try testing.expectEqualStrings("pkg_a_long", args.install_xxh_packages.items[0]);
-    try testing.expect(args.has_list_xxh_packages);
-    try testing.expectEqual(@as(usize, 2), args.list_xxh_packages.items.len);
-    try testing.expectEqualStrings("pkg_list_a", args.list_xxh_packages.items[0]);
-    try testing.expectEqualStrings("pkg_list_b", args.list_xxh_packages.items[1]);
-    try testing.expectEqual(@as(usize, 1), args.reinstall_xxh_packages.items.len);
-    try testing.expectEqualStrings("pkg_b_long", args.reinstall_xxh_packages.items[0]);
-    try testing.expectEqual(@as(usize, 1), args.remove_xxh_packages.items.len);
-    try testing.expectEqualStrings("pkg_c_long", args.remove_xxh_packages.items[0]);
+    try testing.expectEqual(@as(usize, 1), args.install_zzh_packages.items.len);
+    try testing.expectEqualStrings("pkg_a_long", args.install_zzh_packages.items[0]);
+    try testing.expect(args.has_list_zzh_packages);
+    try testing.expectEqual(@as(usize, 2), args.list_zzh_packages.items.len);
+    try testing.expectEqualStrings("pkg_list_a", args.list_zzh_packages.items[0]);
+    try testing.expectEqualStrings("pkg_list_b", args.list_zzh_packages.items[1]);
+    try testing.expectEqual(@as(usize, 1), args.reinstall_zzh_packages.items.len);
+    try testing.expectEqualStrings("pkg_b_long", args.reinstall_zzh_packages.items[0]);
+    try testing.expectEqual(@as(usize, 1), args.remove_zzh_packages.items.len);
+    try testing.expectEqualStrings("pkg_c_long", args.remove_zzh_packages.items[0]);
     try testing.expect(args.list_shells);
     try testing.expect(args.list_plugins);
     try testing.expect(args.extract_sourcing_files);
@@ -588,7 +591,7 @@ test "Destination Parsing Helper Test" {
 
 test "CLI Parsing Test - Unrecognized options and corner cases" {
     const testing = std.testing;
-    var args = XxhArgs.init(testing.allocator);
+    var args = ZzhArgs.init(testing.allocator);
     defer args.deinit();
 
     // -D is length 2 option that is not recognized but takes an argument
@@ -607,5 +610,53 @@ test "CLI Parsing Test - Unrecognized options and corner cases" {
     try testing.expectEqualStrings("9090", args.ssh_args.items[1]);
     try testing.expectEqualStrings("-z", args.ssh_args.items[2]);
 }
+
+pub fn readPassword(allocator: std.mem.Allocator, prompt: []const u8) ![]u8 {
+    const stdout = std.io.getStdOut().writer();
+    try stdout.print("{s}", .{prompt});
+
+    const stdin = std.io.getStdIn();
+    const builtin = @import("builtin");
+
+    if (builtin.os.tag == .windows) {
+        const windows = std.os.windows;
+        var mode: windows.DWORD = 0;
+        if (windows.kernel32.GetConsoleMode(stdin.handle, &mode) == windows.FALSE) {
+            return error.GetConsoleModeFailed;
+        }
+        const ENABLE_ECHO_INPUT = 0x0004;
+        const new_mode = mode & ~@as(windows.DWORD, ENABLE_ECHO_INPUT);
+        if (windows.kernel32.SetConsoleMode(stdin.handle, new_mode) == windows.FALSE) {
+            return error.SetConsoleModeFailed;
+        }
+        defer _ = windows.kernel32.SetConsoleMode(stdin.handle, mode);
+
+        var buf: [1024]u8 = undefined;
+        const amt = try stdin.reader().readUntilDelimiterOrEof(&buf, '\n');
+        try stdout.print("\n", .{});
+        if (amt) |a| {
+            var len = a.len;
+            if (len > 0 and a[len - 1] == '\r') len -= 1;
+            return allocator.dupe(u8, a[0..len]);
+        }
+        return error.EndOfStream;
+    } else {
+        const posix = std.posix;
+        var termios = try posix.tcgetattr(stdin.handle);
+        const original_termios = termios;
+        termios.lflag.ECHO = false;
+        try posix.tcsetattr(stdin.handle, .FLUSH, termios);
+        defer posix.tcsetattr(stdin.handle, .FLUSH, original_termios) catch {};
+
+        var buf: [1024]u8 = undefined;
+        const amt = try stdin.reader().readUntilDelimiterOrEof(&buf, '\n');
+        try stdout.print("\n", .{});
+        if (amt) |a| {
+            return allocator.dupe(u8, a);
+        }
+        return error.EndOfStream;
+    }
+}
+
 
 

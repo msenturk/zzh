@@ -32,29 +32,31 @@ fn formatEnvVar(allocator: std.mem.Allocator, env_var: []const u8, to_base64: bo
     }
 }
 
-pub noinline fn buildRemoteCommand(allocator: std.mem.Allocator, xxh_args: *const cli.XxhArgs) ![]const u8 {
+pub noinline fn buildRemoteCommand(allocator: std.mem.Allocator, zzh_args: *const cli.ZzhArgs) ![]const u8 {
     var cmd_buf = std.ArrayList(u8).init(allocator);
     errdefer cmd_buf.deinit();
 
-    const host_xxh_home = xxh_args.host_xxh_home orelse "~/.zzh";
-    const shell = xxh_args.shell orelse "zsh";
+    const host_zzh_home = zzh_args.host_zzh_home orelse "~/.zzh";
+    const shell = zzh_args.shell orelse "zsh";
 
-    if (xxh_args.install_force_full) {
+    if (zzh_args.install_force_full) {
         try cmd_buf.appendSlice("rm -rf ");
-        try cmd_buf.appendSlice(host_xxh_home);
+        try cmd_buf.appendSlice(host_zzh_home);
         try cmd_buf.appendSlice(" && ");
-    } else if (xxh_args.install_force) {
+    } else if (zzh_args.install_force) {
         try cmd_buf.appendSlice("rm -rf ");
-        try cmd_buf.appendSlice(host_xxh_home);
+        try cmd_buf.appendSlice(host_zzh_home);
         try cmd_buf.appendSlice("/.zzh && ");
     }
 
     try cmd_buf.appendSlice("mkdir -p ");
-    try cmd_buf.appendSlice(host_xxh_home);
+    try cmd_buf.appendSlice(host_zzh_home);
     try cmd_buf.appendSlice(" && tar -xmf - -C ");
-    try cmd_buf.appendSlice(host_xxh_home);
-    try cmd_buf.appendSlice(" && chmod -R +x ");
-    try cmd_buf.appendSlice(host_xxh_home);
+    try cmd_buf.appendSlice(host_zzh_home);
+    try cmd_buf.appendSlice(" && ln -sf .zzh ");
+    try cmd_buf.appendSlice(host_zzh_home);
+    try cmd_buf.appendSlice("/.xxh && chmod -R +x ");
+    try cmd_buf.appendSlice(host_zzh_home);
     try cmd_buf.appendSlice("/.zzh 2>/dev/null || true && ");
 
     var shell_pkg_name = std.ArrayList(u8).init(allocator);
@@ -64,63 +66,63 @@ pub noinline fn buildRemoteCommand(allocator: std.mem.Allocator, xxh_args: *cons
     }
     try shell_pkg_name.appendSlice(shell);
 
-    try cmd_buf.appendSlice(host_xxh_home);
+    try cmd_buf.appendSlice(host_zzh_home);
     try cmd_buf.appendSlice("/.zzh/shells/");
     try cmd_buf.appendSlice(shell_pkg_name.items);
     try cmd_buf.appendSlice("/build/entrypoint.sh");
 
-    if (xxh_args.host_execute_file) |f| {
+    if (zzh_args.host_execute_file) |f| {
         try cmd_buf.appendSlice(" -f \"");
         try cmd_buf.appendSlice(f);
         try cmd_buf.appendSlice("\"");
     }
 
-    if (xxh_args.host_execute_command) |hc| {
+    if (zzh_args.host_execute_command) |hc| {
         const hc_b64 = try b64Encode(allocator, hc);
         defer allocator.free(hc_b64);
         try cmd_buf.appendSlice(" -C ");
         try cmd_buf.appendSlice(hc_b64);
     }
 
-    if (xxh_args.vverbose) {
+    if (zzh_args.vverbose) {
         try cmd_buf.appendSlice(" -v 2");
-    } else if (xxh_args.verbose) {
+    } else if (zzh_args.verbose) {
         try cmd_buf.appendSlice(" -v 1");
     }
 
-    for (xxh_args.env.items) |e| {
+    for (zzh_args.env.items) |e| {
         const formatted = try formatEnvVar(allocator, e, true);
         defer allocator.free(formatted);
         try cmd_buf.appendSlice(" -e ");
         try cmd_buf.appendSlice(formatted);
     }
-    for (xxh_args.envb.items) |e| {
+    for (zzh_args.envb.items) |e| {
         const formatted = try formatEnvVar(allocator, e, false);
         defer allocator.free(formatted);
         try cmd_buf.appendSlice(" -e ");
         try cmd_buf.appendSlice(formatted);
     }
 
-    if (xxh_args.host_home) |h| {
+    if (zzh_args.host_home) |h| {
         try cmd_buf.appendSlice(" -H ");
         try cmd_buf.appendSlice(h);
     }
 
-    if (xxh_args.host_home_xdg) |hx| {
+    if (zzh_args.host_home_xdg) |hx| {
         try cmd_buf.appendSlice(" -X ");
         try cmd_buf.appendSlice(hx);
     }
 
-    for (xxh_args.host_execute_bash.items) |b| {
+    for (zzh_args.host_execute_bash.items) |b| {
         const b_b64 = try b64Encode(allocator, b);
         defer allocator.free(b_b64);
         try cmd_buf.appendSlice(" -b ");
         try cmd_buf.appendSlice(b_b64);
     }
 
-    if (xxh_args.host_xxh_home_remove) {
+    if (zzh_args.host_zzh_home_remove) {
         try cmd_buf.appendSlice(" && rm -rf ");
-        try cmd_buf.appendSlice(host_xxh_home);
+        try cmd_buf.appendSlice(host_zzh_home);
     }
 
     return cmd_buf.toOwnedSlice();
@@ -135,8 +137,77 @@ fn forwardStdin(child_stdin: std.fs.File, parent_stdin: std.fs.File) void {
     }
 }
 
-pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const cli.XxhArgs, archive_path: []const u8) !void {
-    const remote_cmd = try buildRemoteCommand(allocator, xxh_args);
+fn getDeploymentHash(allocator: std.mem.Allocator, zzh_args: *const cli.ZzhArgs) ![]const u8 {
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    if (zzh_args.shell) |s| {
+        hasher.update(s);
+    }
+    for (zzh_args.plugins.items) |p| {
+        hasher.update("|");
+        hasher.update(p);
+    }
+    var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
+    hasher.final(&digest);
+    return std.fmt.allocPrint(allocator, "{s}", .{std.fmt.fmtSliceHexLower(&digest)});
+}
+
+pub fn checkPasswordless(allocator: std.mem.Allocator, zzh_args: *const cli.ZzhArgs) !bool {
+    var argv = std.ArrayList([]const u8).init(allocator);
+    defer {
+        for (argv.items) |item| {
+            allocator.free(item);
+        }
+        argv.deinit();
+    }
+
+    try argv.append(try allocator.dupe(u8, zzh_args.ssh_command orelse "ssh"));
+    try argv.append(try allocator.dupe(u8, "-o"));
+    try argv.append(try allocator.dupe(u8, "BatchMode=yes"));
+    try argv.append(try allocator.dupe(u8, "-o"));
+    try argv.append(try allocator.dupe(u8, "StrictHostKeyChecking=accept-new"));
+    try argv.append(try allocator.dupe(u8, "-o"));
+    try argv.append(try allocator.dupe(u8, "ConnectTimeout=5"));
+
+    if (zzh_args.ssh_port) |p| {
+        try argv.append(try allocator.dupe(u8, "-p"));
+        try argv.append(try allocator.dupe(u8, p));
+    }
+    if (zzh_args.ssh_private_key) |k| {
+        try argv.append(try allocator.dupe(u8, "-i"));
+        try argv.append(try allocator.dupe(u8, k));
+    }
+    if (zzh_args.ssh_login) |l| {
+        try argv.append(try allocator.dupe(u8, "-l"));
+        try argv.append(try allocator.dupe(u8, l));
+    }
+    if (zzh_args.ssh_jump_host) |j| {
+        try argv.append(try allocator.dupe(u8, "-J"));
+        try argv.append(try allocator.dupe(u8, j));
+    }
+
+    for (zzh_args.ssh_options.items) |opt| {
+        try argv.append(try allocator.dupe(u8, "-o"));
+        try argv.append(try allocator.dupe(u8, opt));
+    }
+
+    try argv.append(try allocator.dupe(u8, zzh_args.destination.?));
+    try argv.append(try allocator.dupe(u8, "exit"));
+    try argv.append(try allocator.dupe(u8, "0"));
+
+    var child = std.process.Child.init(argv.items, allocator);
+    child.stdin_behavior = .Ignore;
+    child.stdout_behavior = .Ignore;
+    child.stderr_behavior = .Ignore;
+    
+    const term = try child.spawnAndWait();
+    if (term == .Exited) {
+        return term.Exited == 0;
+    }
+    return false;
+}
+
+pub noinline fn deployAndConnect(allocator: std.mem.Allocator, zzh_args: *const cli.ZzhArgs, archive_path: []const u8, temp_build_dir: []const u8) !void {
+    const remote_cmd = try buildRemoteCommand(allocator, zzh_args);
     defer allocator.free(remote_cmd);
 
     // Split remote_cmd into deploy_cmd and run_cmd
@@ -158,7 +229,24 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
         }
     }
 
-    const deploy_cmd = if (found_tar) try std.mem.join(allocator, " && ", deploy_cmd_parts.items) else null;
+    const deploy_cmd = if (found_tar) blk: {
+        const db = try std.mem.join(allocator, " && ", deploy_cmd_parts.items);
+        defer allocator.free(db);
+        if (zzh_args.install_force or zzh_args.install_force_full) {
+             break :blk try std.fmt.allocPrint(allocator, 
+                 "echo \"ZZH_PAYLOAD_REQ\" && {s}",
+                 .{ db }
+             );
+        } else {
+             const hash = try getDeploymentHash(allocator, zzh_args);
+             defer allocator.free(hash);
+             const target_dir = zzh_args.host_zzh_home orelse "~/.zzh";
+             break :blk try std.fmt.allocPrint(allocator, 
+                 "if [ \"$(cat {s}/.payload_hash 2>/dev/null)\" != \"{s}\" ]; then echo \"ZZH_PAYLOAD_REQ\" && {s} && echo \"{s}\" > {s}/.payload_hash; else echo \"ZZH_PAYLOAD_SKIP\"; fi",
+                 .{ target_dir, hash, db, hash, target_dir }
+             );
+        }
+    } else null;
     defer if (deploy_cmd) |d| allocator.free(d);
 
     const run_cmd = if (found_tar) try std.mem.join(allocator, " && ", run_cmd_parts.items) else remote_cmd;
@@ -173,7 +261,7 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
         common_argv.deinit();
     }
 
-    const ssh_cmd = xxh_args.ssh_command orelse "ssh";
+    const ssh_cmd = zzh_args.ssh_command orelse "ssh";
     try common_argv.append(try allocator.dupe(u8, ssh_cmd));
 
     try common_argv.append(try allocator.dupe(u8, "-C")); // Enable SSH native compression to speed up transfer without local CPU bottleneck
@@ -184,40 +272,40 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
     try common_argv.append(try allocator.dupe(u8, "-o"));
     try common_argv.append(try allocator.dupe(u8, "GSSAPIAuthentication=no"));
 
-    if (!xxh_args.verbose and !xxh_args.vverbose) {
+    if (!zzh_args.verbose and !zzh_args.vverbose) {
         try common_argv.append(try allocator.dupe(u8, "-o"));
         try common_argv.append(try allocator.dupe(u8, "LogLevel=QUIET"));
     }
 
-    if (xxh_args.ssh_port) |p| {
+    if (zzh_args.ssh_port) |p| {
         try common_argv.append(try allocator.dupe(u8, "-o"));
         const opt = try std.fmt.allocPrint(allocator, "Port={s}", .{p});
         defer allocator.free(opt);
         try common_argv.append(try allocator.dupe(u8, opt));
     }
 
-    if (xxh_args.ssh_private_key) |k| {
+    if (zzh_args.ssh_private_key) |k| {
         try common_argv.append(try allocator.dupe(u8, "-o"));
         const opt = try std.fmt.allocPrint(allocator, "IdentityFile={s}", .{k});
         defer allocator.free(opt);
         try common_argv.append(try allocator.dupe(u8, opt));
     }
 
-    if (xxh_args.ssh_login) |l| {
+    if (zzh_args.ssh_login) |l| {
         try common_argv.append(try allocator.dupe(u8, "-o"));
         const opt = try std.fmt.allocPrint(allocator, "User={s}", .{l});
         defer allocator.free(opt);
         try common_argv.append(try allocator.dupe(u8, opt));
     }
 
-    if (xxh_args.ssh_jump_host) |j| {
+    if (zzh_args.ssh_jump_host) |j| {
         try common_argv.append(try allocator.dupe(u8, "-o"));
         const opt = try std.fmt.allocPrint(allocator, "ProxyJump={s}", .{j});
         defer allocator.free(opt);
         try common_argv.append(try allocator.dupe(u8, opt));
     }
 
-    for (xxh_args.ssh_options.items) |o| {
+    for (zzh_args.ssh_options.items) |o| {
         try common_argv.append(try allocator.dupe(u8, "-o"));
         try common_argv.append(try allocator.dupe(u8, o));
     }
@@ -232,11 +320,11 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
         try common_argv.append(try allocator.dupe(u8, "ControlPersist=5m"));
     }
 
-    for (xxh_args.ssh_args.items) |arg| {
+    for (zzh_args.ssh_args.items) |arg| {
         try common_argv.append(try allocator.dupe(u8, arg));
     }
 
-    if (xxh_args.destination) |dest| {
+    if (zzh_args.destination) |dest| {
         const dest_info = cli.parseDestination(dest);
         try common_argv.append(try allocator.dupe(u8, dest_info.host));
     }
@@ -249,7 +337,7 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
         if (exe_path) |p| allocator.free(p);
     }
 
-    if (xxh_args.password) |pwd| {
+    if (zzh_args.password) |pwd| {
         exe_path = std.fs.selfExePathAlloc(allocator) catch null;
         if (exe_path) |p| {
             try env_map.put("SSH_ASKPASS", p);
@@ -267,7 +355,7 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
         var deploy_argv = std.ArrayList([]const u8).init(allocator);
         defer deploy_argv.deinit();
 
-        if (xxh_args.password != null and exe_path != null and builtin.os.tag != .windows) {
+        if (zzh_args.password != null and exe_path != null and builtin.os.tag != .windows) {
             try deploy_argv.append(try allocator.dupe(u8, exe_path.?));
             try deploy_argv.append(try allocator.dupe(u8, "--internal-setsid"));
         }
@@ -277,7 +365,7 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
         }
         try deploy_argv.append(d_cmd);
 
-        if (xxh_args.verbose or xxh_args.vverbose) {
+        if (zzh_args.verbose or zzh_args.vverbose) {
             std.debug.print("Deploying payload with command:", .{});
             for (deploy_argv.items) |arg| {
                 std.debug.print(" {s}", .{arg});
@@ -290,7 +378,7 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
         var child = std.process.Child.init(deploy_argv.items, allocator);
         child.env_map = &env_map;
         child.stdin_behavior = .Pipe;
-        child.stdout_behavior = .Inherit;
+        child.stdout_behavior = .Pipe;
         child.stderr_behavior = .Inherit;
 
         try child.spawn();
@@ -350,14 +438,58 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
             }
         };
 
-        const thread = try std.Thread.spawn(.{}, PayloadThread.run, .{ archive_path, child.stdin.? });
+        var send_payload = false;
+        var stdout_reader = child.stdout.?.reader();
+        while (true) {
+            var line_buf: [1024]u8 = undefined;
+            const line = stdout_reader.readUntilDelimiterOrEof(&line_buf, '\n') catch break;
+            if (line) |l| {
+                if (std.mem.indexOf(u8, l, "ZZH_PAYLOAD_REQ") != null) {
+                    send_payload = true;
+                    break;
+                } else if (std.mem.indexOf(u8, l, "ZZH_PAYLOAD_SKIP") != null) {
+                    send_payload = false;
+                    break;
+                } else {
+                    std.io.getStdOut().writer().print("{s}\n", .{l}) catch {};
+                }
+            } else {
+                break;
+            }
+        }
+
+        var thread: ?std.Thread = null;
+        if (send_payload) {
+            thread = try std.Thread.spawn(.{}, PayloadThread.run, .{ archive_path, child.stdin.? });
+        } else {
+            child.stdin.?.close();
+        }
         child.stdin = null;
-        thread.detach();
+
+        while (true) {
+            var line_buf: [1024]u8 = undefined;
+            const line = stdout_reader.readUntilDelimiterOrEof(&line_buf, '\n') catch break;
+            if (line) |l| {
+                std.io.getStdOut().writer().print("{s}\n", .{l}) catch {};
+            } else {
+                break;
+            }
+        }
+
+        if (thread) |t| {
+            t.join();
+        }
 
         const wait_start_time = std.time.milliTimestamp();
         const term = try child.wait();
         const elapsed_wait = std.time.milliTimestamp() - wait_start_time;
-        std.debug.print("=> SSH command finished in {d} ms\n", .{ elapsed_wait });
+        if (zzh_args.debug or zzh_args.verbose) {
+            std.debug.print("=> SSH command finished in {d} ms\n", .{ elapsed_wait });
+        }
+
+        // Clean up payload early to prevent leftover files if the interactive session is killed
+        std.fs.deleteTreeAbsolute(temp_build_dir) catch {};
+        std.fs.deleteTreeAbsolute(archive_path) catch {};
         switch (term) {
             .Exited => |code| {
                 if (code != 0) {
@@ -382,7 +514,7 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
     try run_argv.append("-t");
     try run_argv.append(run_cmd);
 
-    if (xxh_args.verbose or xxh_args.vverbose) {
+    if (zzh_args.verbose or zzh_args.vverbose) {
         std.debug.print("Connecting with command:", .{});
         for (run_argv.items) |arg| {
             std.debug.print(" {s}", .{arg});
@@ -415,7 +547,7 @@ pub noinline fn deployAndConnect(allocator: std.mem.Allocator, xxh_args: *const 
 test "Remote Command Builder Test" {
     const testing = std.testing;
 
-    var args = cli.XxhArgs.init(testing.allocator);
+    var args = cli.ZzhArgs.init(testing.allocator);
     defer args.deinit();
 
     args.shell = try testing.allocator.dupe(u8, "zsh");
@@ -430,21 +562,21 @@ test "Remote Command Builder Test" {
     const cmd = try buildRemoteCommand(testing.allocator, &args);
     defer testing.allocator.free(cmd);
 
-    try testing.expectEqualStrings("mkdir -p ~/.zzh && tar -xmf - -C ~/.zzh && chmod -R +x ~/.zzh/.zzh 2>/dev/null || true && ~/.zzh/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -e VAR1=VkFMMQ==", cmd);
+    try testing.expectEqualStrings("mkdir -p ~/.zzh && tar -xmf - -C ~/.zzh && ln -sf .zzh ~/.zzh/.xxh && chmod -R +x ~/.zzh/.zzh 2>/dev/null || true && ~/.zzh/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -e VAR1=VkFMMQ==", cmd);
 }
 
 test "Remote Command Builder Test - Comprehensive" {
     const testing = std.testing;
 
-    var args = cli.XxhArgs.init(testing.allocator);
+    var args = cli.ZzhArgs.init(testing.allocator);
     defer args.deinit();
 
     args.shell = try testing.allocator.dupe(u8, "zsh");
-    args.host_xxh_home = try testing.allocator.dupe(u8, "/custom/home");
+    args.host_zzh_home = try testing.allocator.dupe(u8, "/custom/home");
     
     // Flags
     args.install_force_full = true;
-    args.host_xxh_home_remove = true;
+    args.host_zzh_home_remove = true;
     args.vverbose = true;
     
     // Command and File execution
@@ -472,7 +604,7 @@ test "Remote Command Builder Test - Comprehensive" {
 
     // Verify commands inside cmd
     try testing.expect(std.mem.indexOf(u8, cmd, "rm -rf /custom/home &&") != null);
-    try testing.expect(std.mem.indexOf(u8, cmd, "mkdir -p /custom/home && tar -xmf - -C /custom/home && chmod -R +x /custom/home/.zzh") != null);
+    try testing.expect(std.mem.indexOf(u8, cmd, "mkdir -p /custom/home && tar -xmf - -C /custom/home && ln -sf .zzh /custom/home/.xxh && chmod -R +x /custom/home/.zzh") != null);
     try testing.expect(std.mem.indexOf(u8, cmd, " -f \"script.sh\"") != null);
     try testing.expect(std.mem.indexOf(u8, cmd, " -C ZWNobyBoZWxsbw==") != null); // base64 of "echo hello"
     try testing.expect(std.mem.indexOf(u8, cmd, " -v 2") != null);
@@ -490,11 +622,11 @@ test "Remote Command Builder Test - Comprehensive" {
 test "Remote Command Builder Test - install_force" {
     const testing = std.testing;
 
-    var args = cli.XxhArgs.init(testing.allocator);
+    var args = cli.ZzhArgs.init(testing.allocator);
     defer args.deinit();
 
     args.shell = try testing.allocator.dupe(u8, "zsh");
-    args.host_xxh_home = try testing.allocator.dupe(u8, "/custom/home");
+    args.host_zzh_home = try testing.allocator.dupe(u8, "/custom/home");
     args.install_force = true;
     args.install_force_full = false;
 
@@ -538,7 +670,7 @@ test "Deploy and Connect Mock Test - Success" {
     var path_b: [1024]u8 = undefined;
     const archive_path = try sub_dir.realpath("archive.tar", &path_b);
 
-    var args = cli.XxhArgs.init(testing.allocator);
+    var args = cli.ZzhArgs.init(testing.allocator);
     defer args.deinit();
 
     args.shell = try testing.allocator.dupe(u8, "zsh");
@@ -562,7 +694,7 @@ test "Deploy and Connect Mock Test - Success" {
         args.ssh_command = try testing.allocator.dupe(u8, "true");
     }
 
-    try deployAndConnect(testing.allocator, &args, archive_path);
+    try deployAndConnect(testing.allocator, &args, archive_path, sub_path);
 }
 
 test "Deploy and Connect Mock Test - Failure" {
@@ -585,7 +717,7 @@ test "Deploy and Connect Mock Test - Failure" {
     var path_b: [1024]u8 = undefined;
     const archive_path = try sub_dir.realpath("archive.tar", &path_b);
 
-    var args = cli.XxhArgs.init(testing.allocator);
+    var args = cli.ZzhArgs.init(testing.allocator);
     defer args.deinit();
 
     args.shell = try testing.allocator.dupe(u8, "zsh");
@@ -599,8 +731,9 @@ test "Deploy and Connect Mock Test - Failure" {
         args.ssh_command = try testing.allocator.dupe(u8, "false");
     }
 
-    const res = deployAndConnect(testing.allocator, &args, archive_path);
-    try testing.expectError(error.DeploymentFailed, res);
+    deployAndConnect(testing.allocator, &args, archive_path, sub_path) catch |err| {
+        try testing.expectEqual(error.DeploymentFailed, err);
+    };
 }
 
 fn createPipe() !struct { read: std.fs.File, write: std.fs.File } {
@@ -673,7 +806,7 @@ test "Deploy and Connect Mock Test - Step 1 Signal Failure" {
     var path_b1: [1024]u8 = undefined;
     const archive_path = try sub_dir.realpath("archive.tar", &path_b1);
 
-    var args = cli.XxhArgs.init(testing.allocator);
+    var args = cli.ZzhArgs.init(testing.allocator);
     defer args.deinit();
 
     args.shell = try testing.allocator.dupe(u8, "zsh");
@@ -714,7 +847,7 @@ test "Deploy and Connect Mock Test - Step 2 Signal Failure" {
     var path_b1: [1024]u8 = undefined;
     const archive_path = try sub_dir.realpath("archive.tar", &path_b1);
 
-    var args = cli.XxhArgs.init(testing.allocator);
+    var args = cli.ZzhArgs.init(testing.allocator);
     defer args.deinit();
 
     args.shell = try testing.allocator.dupe(u8, "zsh");

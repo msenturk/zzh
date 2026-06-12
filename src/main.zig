@@ -5,10 +5,10 @@ const package = @import("package.zig");
 const bundler = @import("bundler.zig");
 const deploy = @import("deploy.zig");
 
-fn listPackages(allocator: std.mem.Allocator, local_xxh_home: ?[]const u8, filter_packages: []const []const u8) !void {
+fn listPackages(allocator: std.mem.Allocator, local_zzh_home: ?[]const u8, filter_packages: []const []const u8) !void {
     const stdout = std.io.getStdOut().writer();
     var base_dir: []const u8 = undefined;
-    if (local_xxh_home) |lh| {
+    if (local_zzh_home) |lh| {
         base_dir = try config.resolvePath(allocator, lh);
     } else {
         const home = config.getHomeDir(allocator) orelse return error.HomeDirNotFound;
@@ -50,10 +50,10 @@ fn listPackages(allocator: std.mem.Allocator, local_xxh_home: ?[]const u8, filte
     }
 }
 
-fn listShellsOrPlugins(allocator: std.mem.Allocator, local_xxh_home: ?[]const u8, sub: []const u8) !void {
+fn listShellsOrPlugins(allocator: std.mem.Allocator, local_zzh_home: ?[]const u8, sub: []const u8) !void {
     const stdout = std.io.getStdOut().writer();
     var base_dir: []const u8 = undefined;
-    if (local_xxh_home) |lh| {
+    if (local_zzh_home) |lh| {
         base_dir = try config.resolvePath(allocator, lh);
     } else {
         const home = config.getHomeDir(allocator) orelse return error.HomeDirNotFound;
@@ -193,12 +193,12 @@ pub fn main() !void {
 
     // Check if we are performing a local packages operation
     const has_local_ops_only = cli_args_only.destination == null and (
-        cli_args_only.has_list_xxh_packages or
+        cli_args_only.has_list_zzh_packages or
         cli_args_only.list_shells or
         cli_args_only.list_plugins or
-        cli_args_only.install_xxh_packages.items.len > 0 or
-        cli_args_only.reinstall_xxh_packages.items.len > 0 or
-        cli_args_only.remove_xxh_packages.items.len > 0
+        cli_args_only.install_zzh_packages.items.len > 0 or
+        cli_args_only.reinstall_zzh_packages.items.len > 0 or
+        cli_args_only.remove_zzh_packages.items.len > 0
     );
 
     if (cli_args_only.destination == null and !has_local_ops_only) {
@@ -225,7 +225,7 @@ pub fn main() !void {
     }
 
     // 3. Merge arguments: Config file arguments first, then CLI arguments
-    var merged_args = cli.XxhArgs.init(allocator);
+    var merged_args = cli.ZzhArgs.init(allocator);
     defer merged_args.deinit();
 
     try cli.parseFromSlice(allocator, config_args_list.items, &merged_args);
@@ -246,31 +246,31 @@ pub fn main() !void {
 
     // 4. Perform package operations if requested
     var package_op_performed = false;
-    if (merged_args.install_xxh_packages.items.len > 0) {
-        for (merged_args.install_xxh_packages.items) |pkg_name| {
+    if (merged_args.install_zzh_packages.items.len > 0) {
+        for (merged_args.install_zzh_packages.items) |pkg_name| {
             const is_shell = std.mem.indexOf(u8, pkg_name, "-shell-") != null;
             const resolved = try package.resolvePackage(allocator, pkg_name, is_shell);
             defer package.freeResolvedPackage(allocator, resolved);
-            const path = try package.downloadAndCachePackage(allocator, resolved, is_shell, merged_args.install_force, merged_args.local_xxh_home);
+            const path = try package.downloadAndCachePackage(allocator, resolved, is_shell, merged_args.install_force, merged_args.local_zzh_home);
             allocator.free(path);
         }
         package_op_performed = true;
     }
 
-    if (merged_args.reinstall_xxh_packages.items.len > 0) {
-        for (merged_args.reinstall_xxh_packages.items) |pkg_name| {
+    if (merged_args.reinstall_zzh_packages.items.len > 0) {
+        for (merged_args.reinstall_zzh_packages.items) |pkg_name| {
             const is_shell = std.mem.indexOf(u8, pkg_name, "-shell-") != null;
             const resolved = try package.resolvePackage(allocator, pkg_name, is_shell);
             defer package.freeResolvedPackage(allocator, resolved);
-            const path = try package.downloadAndCachePackage(allocator, resolved, is_shell, true, merged_args.local_xxh_home);
+            const path = try package.downloadAndCachePackage(allocator, resolved, is_shell, true, merged_args.local_zzh_home);
             allocator.free(path);
         }
         package_op_performed = true;
     }
 
-    if (merged_args.remove_xxh_packages.items.len > 0) {
+    if (merged_args.remove_zzh_packages.items.len > 0) {
         var base_dir: []const u8 = undefined;
-        if (merged_args.local_xxh_home) |lh| {
+        if (merged_args.local_zzh_home) |lh| {
             base_dir = try config.resolvePath(allocator, lh);
         } else {
             const home = config.getHomeDir(allocator) orelse return error.HomeDirNotFound;
@@ -279,7 +279,7 @@ pub fn main() !void {
         }
         defer allocator.free(base_dir);
 
-        for (merged_args.remove_xxh_packages.items) |pkg_name| {
+        for (merged_args.remove_zzh_packages.items) |pkg_name| {
             const is_shell = std.mem.indexOf(u8, pkg_name, "-shell-") != null;
             const sub_dir = if (is_shell) "shells" else "plugins";
             const resolved = try package.resolvePackage(allocator, pkg_name, is_shell);
@@ -294,18 +294,18 @@ pub fn main() !void {
         package_op_performed = true;
     }
 
-    if (merged_args.has_list_xxh_packages) {
-        try listPackages(allocator, merged_args.local_xxh_home, merged_args.list_xxh_packages.items);
+    if (merged_args.has_list_zzh_packages) {
+        try listPackages(allocator, merged_args.local_zzh_home, merged_args.list_zzh_packages.items);
         return;
     }
 
     if (merged_args.list_shells) {
-        try listShellsOrPlugins(allocator, merged_args.local_xxh_home, "shells");
+        try listShellsOrPlugins(allocator, merged_args.local_zzh_home, "shells");
         return;
     }
 
     if (merged_args.list_plugins) {
-        try listShellsOrPlugins(allocator, merged_args.local_xxh_home, "plugins");
+        try listShellsOrPlugins(allocator, merged_args.local_zzh_home, "plugins");
         return;
     }
 
@@ -334,7 +334,7 @@ pub fn main() !void {
     const resolved_shell = try package.resolvePackage(allocator, shell_name, true);
     defer package.freeResolvedPackage(allocator, resolved_shell);
 
-    const shell_path = try package.downloadAndCachePackage(allocator, resolved_shell, true, merged_args.install_force, merged_args.local_xxh_home);
+    const shell_path = try package.downloadAndCachePackage(allocator, resolved_shell, true, merged_args.install_force, merged_args.local_zzh_home);
     defer allocator.free(shell_path);
 
     // 7. Resolve and download plugin packages
@@ -348,16 +348,26 @@ pub fn main() !void {
         const resolved_plugin = try package.resolvePackage(allocator, plugin_name, false);
         defer package.freeResolvedPackage(allocator, resolved_plugin);
 
-        const plugin_path = try package.downloadAndCachePackage(allocator, resolved_plugin, false, merged_args.install_force, merged_args.local_xxh_home);
+        const plugin_path = try package.downloadAndCachePackage(allocator, resolved_plugin, false, merged_args.install_force, merged_args.local_zzh_home);
         try plugin_paths.append(plugin_path);
     }
 
+    // Check if we need to prompt for a password preemptively
+    if (merged_args.password == null) {
+        if (!try deploy.checkPasswordless(allocator, &merged_args)) {
+            var prompt_buf: [256]u8 = undefined;
+            const prompt = try std.fmt.bufPrint(&prompt_buf, "{s}'s password: ", .{merged_args.destination.?});
+            const pwd = try cli.readPassword(allocator, prompt);
+            merged_args.password = pwd;
+        }
+    }
+
     // 8. Bundle payload
-    const bundle = try bundler.buildPayload(allocator, shell_path, plugin_paths.items);
+    const bundle = try bundler.buildPayload(allocator, shell_path, plugin_paths.items, &merged_args);
     defer bundler.cleanupBundle(allocator, bundle);
 
     // 9. Deploy and connect
-    try deploy.deployAndConnect(allocator, &merged_args, bundle.archive_path);
+    try deploy.deployAndConnect(allocator, &merged_args, bundle.archive_path, bundle.temp_build_dir);
 }
 
 test "simple test" {
