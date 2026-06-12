@@ -115,20 +115,33 @@ hosts:
 Use `zzh` exactly like you would use `ssh`. Simply prefix standard SSH commands or add `zzh`-specific arguments:
 
 ```bash
-# Connect to host using zsh
+# Connect to a host using zsh (the default portable shell)
 zzh user@host +s zsh
 
-# Connect to host using nushell (defaults to xxh-shell-nu)
+# Connect to a host using Nushell (resolves to xxh-shell-nu)
 zzh user@host +s nu
 
-# Connect to host using the alias 'nushell'
-zzh user@host +s nushell
-
-# Connect to host using our Nushell shell package via Git
+# Install a shell directly from a Git repository
 zzh user@host +s nu+git+https://github.com/msenturk/xxh-shell-nu
 
-# Connect to host and pre-install a plugin
-zzh user@host +s zsh +I xxh-plugin-zsh-ohmyzsh
+# Pass standard SSH arguments (ports, keys, etc.) seamlessly
+zzh -i ~/.ssh/id_rsa -p 2222 user@host +s zsh
+
+# Install multiple plugins along with your shell
+zzh user@host +s zsh +I xxh-plugin-zsh-ohmyzsh +I xxh-plugin-zsh-zoxide
+
+# Pass environment variables to the remote shell session
+zzh user@host +s zsh +e OSH_THEME="powerlevel10k" +e MY_VAR="value"
+
+# Force a full reinstall of the remote payload (useful if you updated a plugin locally)
+zzh user@host +s zsh +iff
+
+# Automatically provide a password for hosts that require one (bypasses interactive prompts)
+zzh user@host ++password "my_secret_password" +s zsh
+
+# List locally installed shells and plugins
+zzh ++list-shells
+zzh ++list-plugins
 ```
 
 
