@@ -17,7 +17,7 @@ A zero-dependency, hyper-fast rewrite of the [xxh](https://github.com/xxh/xxh) o
 
 `zzh` allows you to bring your favorite interactive shell (e.g., `zsh`, `fish`, `bash`, `nu`) along with all your custom configurations, themes, and plugins to any remote host you connect to via SSH. It does this without requiring administrative privileges, pre-installation on the remote host, or local Python dependencies.
 
-![zzh Demo](assets/demo.gif)
+<img src="assets/demo.gif" width="100%" alt="zzh Demo">
 
 
 ---
