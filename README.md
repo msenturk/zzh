@@ -20,7 +20,7 @@ A zero-dependency, hyper-fast rewrite of the [xxh](https://github.com/xxh/xxh) o
 ![zzh Demo](assets/demo.svg)
 
 
-
+---
 
 
 
