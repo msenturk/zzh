@@ -137,11 +137,14 @@ fn printHelp() void {
         \\  +p, ++plugin <name>      Plugin to install and load (e.g. zsh-autosuggestions)
         \\  +i, ++install            Force install packages without connecting
         \\  +if, ++install-force     Force re-download packages
+        \\  +iff, ++install-force-full Force re-download and wipe existing staged home
         \\  +xc, ++zzh-config <path> Path to config.zzhc file
         \\  ++config-init            Scaffold a default config.zzhc file in ~/.config/zzh/
         \\  +e, ++env <NAME=VAL>     Set environment variable on host
         \\  +eb, ++envb <NAME=B64>   Set base64 encoded environment variable
         \\  +P, ++password <pass>    SSH password (use ++password-prompt for secure prompt)
+        \\  ++debug, --debug         Show debug logs and force verbose mode
+        \\  ++time, --time           Show timing breakdown for each phase
         \\
         \\Package Management:
         \\  +I, ++install-zzh-packages <pkg>   Install package locally (use 'tmux' for portable tmux)
@@ -153,9 +156,22 @@ fn printHelp() void {
         \\  +LS, ++list-shells                 List installed shells
         \\  +LP, ++list-plugins                List installed plugins
         \\  ++update                           Update all cached packages (git pull)
-        \\  ++tmux                             Attach to (or create) a tmux session on remote
+        \\  ++tmux                             Attach to (or create) a tmux session on remote (default)
+        \\  ++no-tmux                          Disable tmux wrapping for the session
         \\  ++tmux-session <name>              Tmux session name (default: zzh)
-        \\  +d, ++dotfile <file>               Sync dotfile to remote home
+        \\  +d, ++dotfile <file[:name]>        Sync local dotfile to remote home (supports renaming)
+        \\
+        \\Advanced Configuration:
+        \\  +lh, ++local-zzh-home <path>       Override local zzh home directory (~/.zzh)
+        \\  +hh, ++host-zzh-home <path>        Override remote zzh home directory (~/.zzh)
+        \\  +hhr, ++host-zzh-home-remove       Ephemeral mode: automatically remove payload from remote after disconnect
+        \\  +hhh, ++host-home <path>           Override remote user home directory (~/)
+        \\  +hhx, ++host-home-xdg <path>       Override remote XDG config home directory
+        \\  +ES, ++extract-sourcing-files      Extract shell-specific initialization scripts
+        \\  ++pexpect-timeout <sec>            Timeout for interactive terminal automation
+        \\  ++copy-method <method>             Method to copy payload (tar, rsync, scp)
+        \\  ++scp-command <cmd>                Custom scp command to use
+        \\  ++pexpect-disable                  Disable interactive terminal automation helper
         \\
         \\Host Execution:
         \\  +hc, ++host-execute-command <cmd>  Run a command on host and exit

@@ -594,7 +594,9 @@ pub fn readMaskedPasswordFromTerminal(allocator: std.mem.Allocator, user_prompt:
         const input_line = try stdin.reader().readUntilDelimiterOrEof(&password_buffer, '\n');
         try stdout.print("\n", .{});
         if (input_line) |line| {
-            return allocator.dupe(u8, line);
+            var line_length = line.len;
+            if (line_length > 0 and line[line_length - 1] == '\r') line_length -= 1;
+            return allocator.dupe(u8, line[0..line_length]);
         }
         return error.EndOfStream;
     }
