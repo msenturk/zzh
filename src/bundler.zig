@@ -75,6 +75,11 @@ fn invokeLocalBuildScript(allocator: std.mem.Allocator, package_path: []const u8
         defer allocator.free(build_dir);
 
         if (!pathExists(build_dir)) {
+            if (builtin.os.tag != .windows) {
+                const chmod_argv = [_][]const u8{ "chmod", "+x", build_sh_path };
+                var chmod_child = std.process.Child.init(&chmod_argv, allocator);
+                _ = try chmod_child.spawnAndWait();
+            }
             std.debug.print("Running build.sh in {s}...\n", .{package_path});
             const argv = if (builtin.os.tag == .windows)
                 &[_][]const u8{ "bash", "build.sh" }
