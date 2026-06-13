@@ -123,3 +123,5 @@ done
 
 cd $HOME
 bash --rcfile $CURRENT_DIR/bashrc -i $EXECUTE_FILE "${EXECUTE_COMMAND[@]}"
+
+exec bash

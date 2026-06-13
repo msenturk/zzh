@@ -11,7 +11,7 @@ pub fn discoverUserHomeDirectory(allocator: std.mem.Allocator) ?[]const u8 {
 
 /// Discovers the home directory path from a populated environment variable map.
 /// We check Windows-specific keys first ('USERPROFILE') before POSIX 'HOME' fallback because
-/// Windows environments sometimes define 'HOME' inside emulation layers (like Git Bash), which 
+/// Windows environments sometimes define 'HOME' inside emulation layers (like Git Bash), which
 /// might mismatch the native user profile path we want to target.
 pub noinline fn locateHomeDirectoryInEnvironment(allocator: std.mem.Allocator, environment_variables: *const std.process.EnvMap) ?[]const u8 {
     if (environment_variables.get("USERPROFILE")) |user_profile| {
@@ -140,17 +140,17 @@ fn stripCommentsFromLine(line: []const u8) []const u8 {
 
 fn isBooleanConfigKey(key: []const u8) bool {
     const booleans = [_][]const u8{
-        "+PP", "++password-prompt",
-        "+i", "++install",
-        "+if", "++install-force",
-        "+iff", "++install-force-full",
+        "+PP",           "++password-prompt",
+        "+i",            "++install",
+        "+if",           "++install-force",
+        "+iff",          "++install-force-full",
         "++config-init", "+config-init",
-        "++update",
-        "++tmux",
-        "+hhr", "++host-zzh-home-remove",
-        "+v", "++verbose",
-        "+vv", "++vverbose",
-        "+q", "++quiet", "+quiet",
+        "++update",      "++tmux",
+        "+hhr",          "++host-zzh-home-remove",
+        "+v",            "++verbose",
+        "+vv",           "++vverbose",
+        "+q",            "++quiet",
+        "+quiet",
     };
     for (booleans) |b| {
         if (std.mem.eql(u8, key, b)) return true;
@@ -168,14 +168,9 @@ fn isBooleanConfigKey(key: []const u8) bool {
 ///   - Depth 4: Settings keys containing key-value configurations or starting lists (e.g. `+s: bash`).
 ///   - Depth > 4: Nested list items (prefixed with `- `) under a list-initiating key (e.g. `- ~/.bashrc`).
 /// - Tab characters (`\t`) are converted to exactly 4 spaces (` `) to compute the depth.
-/// - WARNING: Non-standard indentation depths or mixing spaces and tabs in a way that deviates from 
+/// - WARNING: Non-standard indentation depths or mixing spaces and tabs in a way that deviates from
 ///   the exact depths listed above can cause config parsing misdetection or structural confusion.
-pub noinline fn readAndParseConfigurationFile(
-    allocator: std.mem.Allocator,
-    file_path: []const u8,
-    target_host: []const u8,
-    resolved_arguments: *std.ArrayList([]const u8)
-) !void {
+pub noinline fn readAndParseConfigurationFile(allocator: std.mem.Allocator, file_path: []const u8, target_host: []const u8, resolved_arguments: *std.ArrayList([]const u8)) !void {
     const configuration_file = std.fs.openFileAbsolute(file_path, .{}) catch |err| {
         // If the configuration file is missing, we gracefully ignore it and rely entirely on CLI flags.
         if (err == error.FileNotFound) return;
@@ -327,8 +322,6 @@ pub noinline fn readAndParseConfigurationFile(
     }
 }
 
-
-
 /// Creates a default config.zzhc file under ~/.config/zzh/ if it doesn't already exist.
 pub fn initializeDefaultConfigurationFile(allocator: std.mem.Allocator, custom_config_dir: ?[]const u8) !void {
     const config_dir_raw = custom_config_dir orelse "~/.config/zzh";
@@ -355,7 +348,9 @@ pub fn initializeDefaultConfigurationFile(allocator: std.mem.Allocator, custom_c
     defer allocator.free(config_path);
 
     const file_exists = blk: {
-        std.fs.accessAbsolute(config_path, .{}) catch { break :blk false; };
+        std.fs.accessAbsolute(config_path, .{}) catch {
+            break :blk false;
+        };
         break :blk true;
     };
 
@@ -641,7 +636,7 @@ test "initializeDefaultConfigurationFile Test" {
 
 test "stripCommentsFromLine Test" {
     const testing = std.testing;
-    
+
     // Simple comment
     try testing.expectEqualStrings("abc", stripCommentsFromLine("abc#comment"));
     // Comment with spaces
@@ -736,6 +731,3 @@ test "Config Parsing Test - Boolean Options" {
     try testing.expectEqualStrings("+s", args_list.items[2]);
     try testing.expectEqualStrings("bash", args_list.items[3]);
 }
-
-
-

@@ -88,13 +88,13 @@ pub noinline fn fetchPackageVitals(allocator: std.mem.Allocator, raw_name: []con
     } else {
         const clean_name = try allocator.dupe(u8, resolved_name);
         errdefer allocator.free(clean_name);
-        
+
         // Nushell's shell wrapper is hosted inside the zzh repository itself.
         const git_url = if (std.mem.eql(u8, resolved_name, "xxh-shell-nu"))
             try allocator.dupe(u8, "https://github.com/msenturk/zzh/tree/main/shells/xxh-shell-nu")
         else
             try std.fmt.allocPrint(allocator, "https://github.com/xxh/{s}", .{resolved_name});
-        
+
         return .{
             .name = resolved_name,
             .git_url = git_url,
@@ -197,7 +197,7 @@ fn gitCloneSubdirectoryOnly(allocator: std.mem.Allocator, package_name: []const 
             const subfolder = rest[slash_idx + 1 ..];
 
             std.debug.print("      - Downloading {s} (fallback repository)...\n", .{package_name});
-            
+
             const tmp_target_dir = try std.fmt.allocPrint(allocator, "{s}_tmp", .{target_dir});
             defer allocator.free(tmp_target_dir);
             std.fs.deleteTreeAbsolute(tmp_target_dir) catch {};
@@ -242,8 +242,8 @@ pub fn refreshCachedRepositories(allocator: std.mem.Allocator, local_xxh_home: ?
     const sub_dirs = [_][]const u8{ "shells", "plugins" };
     for (sub_dirs) |sub_dir| {
         // Note: The double ".zzh" path construction is intentional.
-        // On the target remote host, the user's payloads and configurations are deployed 
-        // into ~/.zzh/.zzh/ (e.g. ~/.zzh/.zzh/shells/...). Storing cached packages locally 
+        // On the target remote host, the user's payloads and configurations are deployed
+        // into ~/.zzh/.zzh/ (e.g. ~/.zzh/.zzh/shells/...). Storing cached packages locally
         // in ~/.zzh/.zzh/ mirrors the target structure and ensures relative path lookups are consistent.
         const dir_path = try std.fs.path.join(allocator, &.{ base_dir, ".zzh", sub_dir });
         defer allocator.free(dir_path);
@@ -300,7 +300,9 @@ pub fn provisionStaticallyCompiledTmux(allocator: std.mem.Allocator, install_for
     errdefer allocator.free(tmux_path);
 
     const exists = blk: {
-        std.fs.accessAbsolute(tmux_path, .{}) catch { break :blk false; };
+        std.fs.accessAbsolute(tmux_path, .{}) catch {
+            break :blk false;
+        };
         break :blk true;
     };
 
@@ -312,7 +314,7 @@ pub fn provisionStaticallyCompiledTmux(allocator: std.mem.Allocator, install_for
     const url = try std.fmt.allocPrint(allocator, "https://github.com/tmux/tmux-builds/releases/download/{s}/tmux-3.6a-linux-{s}.tar.gz", .{ TMUX_VERSION, target_arch });
     defer allocator.free(url);
     std.debug.print("      - Downloading portable static tmux {s}...\n", .{TMUX_VERSION});
-    
+
     const archive_path = try std.fmt.allocPrint(allocator, "{s}.tar.gz", .{tmux_path});
     defer {
         std.fs.deleteFileAbsolute(archive_path) catch {};
@@ -382,12 +384,12 @@ pub fn obtainAndCachePackage(allocator: std.mem.Allocator, pkg: DownloaderManife
             if (std.mem.indexOf(u8, pkg.git_url, "/tree/") != null) {
                 try gitCloneSubdirectoryOnly(allocator, pkg.clean_name, pkg.git_url, target_dir);
             } else {
-                std.debug.print("      - Downloading {s}...\n", .{ pkg.clean_name });
+                std.debug.print("      - Downloading {s}...\n", .{pkg.clean_name});
                 const argv = [_][]const u8{ "git", "clone", "--depth=1", pkg.git_url, target_dir };
                 executeSubprocess(allocator, &argv) catch |err| {
                     if (err == error.CommandFailed) {
                         std.debug.print("      - Failed to download from git. Trying fallback repository...\n", .{});
-                        const fallback_url = try std.fmt.allocPrint(allocator, "https://github.com/msenturk/zzh/tree/main/{s}/{s}", .{sub_dir, pkg.clean_name});
+                        const fallback_url = try std.fmt.allocPrint(allocator, "https://github.com/msenturk/zzh/tree/main/{s}/{s}", .{ sub_dir, pkg.clean_name });
                         defer allocator.free(fallback_url);
                         try gitCloneSubdirectoryOnly(allocator, pkg.clean_name, fallback_url, target_dir);
                     } else {
@@ -433,7 +435,10 @@ fn normalizeGitHubRepoPath(allocator: std.mem.Allocator, raw_url: []const u8) ![
 }
 
 /// Performs a depth-first search for a file matching target_name inside a directory tree.
-fn searchDirectoryForFile(allocator: std.mem.Allocator, dir_path: []const u8, target_name: []const u8) !?[]const u8 {
+/// Limits depth to 8 to avoid stack overflow on malicious/corrupt archives.
+fn searchDirectoryForFile(allocator: std.mem.Allocator, dir_path: []const u8, target_name: []const u8, depth: u8) !?[]const u8 {
+    if (depth > 8) return null;
+
     var dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch |err| {
         if (err == error.FileNotFound) return null;
         return err;
@@ -445,7 +450,7 @@ fn searchDirectoryForFile(allocator: std.mem.Allocator, dir_path: []const u8, ta
         if (entry.kind == .directory) {
             const sub_path = try std.fs.path.join(allocator, &.{ dir_path, entry.name });
             defer allocator.free(sub_path);
-            if (try searchDirectoryForFile(allocator, sub_path, target_name)) |found| {
+            if (try searchDirectoryForFile(allocator, sub_path, target_name, depth + 1)) |found| {
                 return found;
             }
         } else if (entry.kind == .file or entry.kind == .sym_link) {
@@ -503,9 +508,9 @@ fn promptUserSelectRepo(repos: []RepoSearchItem) !usize {
             }
             return err;
         };
-        
+
         if (line == null) return error.UserInterrupted;
-        
+
         const trimmed = std.mem.trim(u8, line.?, " \t\r");
         if (trimmed.len == 0) continue;
 
@@ -543,9 +548,9 @@ fn promptUserSelectAsset(assets: []ReleaseAsset) !usize {
             }
             return err;
         };
-        
+
         if (line == null) return error.UserInterrupted;
-        
+
         const trimmed = std.mem.trim(u8, line.?, " \t\r");
         if (trimmed.len == 0) continue;
 
@@ -592,11 +597,12 @@ fn selectReleaseAsset(allocator: std.mem.Allocator, assets: []ReleaseAsset, targ
     // Filter stage 1: OS and Architecture matching
     for (assets) |asset| {
         const name = asset.name;
-        if (std.mem.indexOf(u8, name, target_os) != null or 
-            (std.mem.eql(u8, target_os, "linux") and std.mem.indexOf(u8, name, "unknown-linux") != null)) {
-            const has_arch_match = if (is_x64) 
+        if (std.mem.indexOf(u8, name, target_os) != null or
+            (std.mem.eql(u8, target_os, "linux") and std.mem.indexOf(u8, name, "unknown-linux") != null))
+        {
+            const has_arch_match = if (is_x64)
                 (std.mem.indexOf(u8, name, "x86_64") != null or std.mem.indexOf(u8, name, "amd64") != null)
-            else 
+            else
                 (std.mem.indexOf(u8, name, "aarch64") != null or std.mem.indexOf(u8, name, "arm64") != null);
 
             if (has_arch_match) {
@@ -612,9 +618,9 @@ fn selectReleaseAsset(allocator: std.mem.Allocator, assets: []ReleaseAsset, targ
     if (filtered.items.len == 0) {
         for (assets) |asset| {
             const name = asset.name;
-            const has_arch_match = if (is_x64) 
+            const has_arch_match = if (is_x64)
                 (std.mem.indexOf(u8, name, "x86_64") != null or std.mem.indexOf(u8, name, "amd64") != null)
-            else 
+            else
                 (std.mem.indexOf(u8, name, "aarch64") != null or std.mem.indexOf(u8, name, "arm64") != null);
 
             if (has_arch_match) {
@@ -704,7 +710,9 @@ pub fn provisionStaticallyCompiledBinary(
     defer allocator.free(dest_bin_path);
 
     const exists = blk: {
-        std.fs.accessAbsolute(dest_bin_path, .{}) catch { break :blk false; };
+        std.fs.accessAbsolute(dest_bin_path, .{}) catch {
+            break :blk false;
+        };
         break :blk true;
     };
 
@@ -743,10 +751,12 @@ pub fn provisionStaticallyCompiledBinary(
     }
 
     if (is_direct_url) {
+        // Direct URLs bypass target_os/target_arch verification since the user has explicitly
+        // specified the exact file/archive URL to download and provision.
         std.debug.print("      - Downloading direct file/archive from {s}...\n", .{resolved_repo_input});
-        const is_archive = std.mem.endsWith(u8, resolved_repo_input, ".tar.gz") or 
-                           std.mem.endsWith(u8, resolved_repo_input, ".tgz") or 
-                           std.mem.endsWith(u8, resolved_repo_input, ".zip");
+        const is_archive = std.mem.endsWith(u8, resolved_repo_input, ".tar.gz") or
+            std.mem.endsWith(u8, resolved_repo_input, ".tgz") or
+            std.mem.endsWith(u8, resolved_repo_input, ".zip");
 
         if (is_archive) {
             const rand = std.crypto.random.int(u64);
@@ -770,7 +780,7 @@ pub fn provisionStaticallyCompiledBinary(
             try executeSubprocess(allocator, &download_argv);
 
             try ensureDirectoryPath(temp_extract_path);
-            
+
             std.debug.print("      - Extracting archive...\n", .{});
             const tar_cmd = if (builtin.os.tag == .windows) "tar.exe" else "tar";
             const tar_argv = [_][]const u8{ tar_cmd, "-xf", archive_path, "-C", temp_extract_path };
@@ -786,7 +796,7 @@ pub fn provisionStaticallyCompiledBinary(
             }
 
             std.debug.print("      - Locating binary file '{s}'...\n", .{search_name});
-            const found_bin_path = try searchDirectoryForFile(allocator, temp_extract_path, search_name);
+            const found_bin_path = try searchDirectoryForFile(allocator, temp_extract_path, search_name, 0);
 
             if (found_bin_path) |fbp| {
                 defer allocator.free(fbp);
@@ -817,10 +827,10 @@ pub fn provisionStaticallyCompiledBinary(
         if (repo_to_query_allocated) allocator.free(repo_to_query);
     }
 
-    if (std.mem.indexOfScalar(u8, resolved_repo_input, '/') == null and 
-        !std.mem.startsWith(u8, resolved_repo_input, "http://") and 
-        !std.mem.startsWith(u8, resolved_repo_input, "https://")) {
-        
+    if (std.mem.indexOfScalar(u8, resolved_repo_input, '/') == null and
+        !std.mem.startsWith(u8, resolved_repo_input, "http://") and
+        !std.mem.startsWith(u8, resolved_repo_input, "https://"))
+    {
         std.debug.print("      - Searching GitHub for '{s}'...\n", .{resolved_repo_input});
         const json_bytes = try searchGitHubForRepo(allocator, resolved_repo_input, curl_cmd);
         defer allocator.free(json_bytes);
@@ -864,7 +874,7 @@ pub fn provisionStaticallyCompiledBinary(
     std.debug.print("      - Fetching release info from GitHub API...\n", .{});
 
     const api_argv = [_][]const u8{ curl_cmd, "-fsSL", "--connect-timeout", "2", "--max-time", "10", "-H", "User-Agent: zzh-client", api_url };
-    
+
     const json_bytes = try executeSubprocessAndCaptureOutput(allocator, &api_argv);
     defer allocator.free(json_bytes);
 
@@ -908,7 +918,7 @@ pub fn provisionStaticallyCompiledBinary(
         try executeSubprocess(allocator, &tar_argv);
 
         std.debug.print("      - Locating binary file '{s}'...\n", .{bin_name});
-        const found_bin_path = try searchDirectoryForFile(allocator, temp_extract_path, bin_name);
+        const found_bin_path = try searchDirectoryForFile(allocator, temp_extract_path, bin_name, 0);
         if (found_bin_path) |fbp| {
             defer allocator.free(fbp);
             try std.fs.copyFileAbsolute(fbp, dest_bin_path, .{});

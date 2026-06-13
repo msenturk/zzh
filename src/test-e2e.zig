@@ -45,14 +45,7 @@ pub fn main() !void {
     const port_str = try std.fmt.bufPrint(&port_str_b, "{d}", .{port_num});
 
     std.debug.print("Starting podman container on port {d}...\n", .{port_num});
-    const podman_run = [_][]const u8{
-        "podman", "run", "-d", "--rm", "--replace", "--name", "zzh-e2e-test",
-        "-p", port_mapping,
-        "-e", "USER_NAME=testuser",
-        "-e", "USER_PASSWORD=testpass",
-        "-e", "PASSWORD_ACCESS=true",
-        "lscr.io/linuxserver/openssh-server"
-    };
+    const podman_run = [_][]const u8{ "podman", "run", "-d", "--rm", "--replace", "--name", "zzh-e2e-test", "-p", port_mapping, "-e", "USER_NAME=testuser", "-e", "USER_PASSWORD=testpass", "-e", "PASSWORD_ACCESS=true", "lscr.io/linuxserver/openssh-server" };
 
     std.debug.print("Starting podman container...\n", .{});
     var child = std.process.Child.init(&podman_run, allocator);
@@ -78,9 +71,7 @@ pub fn main() !void {
 
     // Install dependencies in container for plugin testing
     std.debug.print("Installing dependencies in test container (python3, git, curl)...\n", .{});
-    const apk_args = [_][]const u8{
-        "podman", "exec", "zzh-e2e-test", "apk", "add", "--no-cache", "python3", "git", "curl"
-    };
+    const apk_args = [_][]const u8{ "podman", "exec", "zzh-e2e-test", "apk", "add", "--no-cache", "python3", "git", "curl" };
     var apk_child = std.process.Child.init(&apk_args, allocator);
     _ = try apk_child.spawnAndWait();
 
@@ -88,16 +79,7 @@ pub fn main() !void {
 
     // Test 1: Basic Connection E2E
     std.debug.print("Running Test 1 (Basic Connection)...\n", .{});
-    const args1 = [_][]const u8{
-        zzh_exe,
-        "testuser@127.0.0.1",
-        "-p", port_str,
-        "++password", "testpass",
-        "+xc", "/dev/null",
-        "+vv",
-        "+s", "zsh",
-        "+hc", "echo E2E_SUCCESS"
-    };
+    const args1 = [_][]const u8{ zzh_exe, "testuser@127.0.0.1", "-p", port_str, "++password", "testpass", "+xc", "/dev/null", "+vv", "+s", "zsh", "+hc", "echo E2E_SUCCESS" };
     const out1 = try runZzh(allocator, &args1);
     defer allocator.free(out1);
     if (std.mem.indexOf(u8, out1, "E2E_SUCCESS") == null) {
@@ -108,17 +90,7 @@ pub fn main() !void {
 
     // Test 2: Tmux Deployment and Session Wrapping E2E
     std.debug.print("Running Test 2 (Tmux Deployment & Wrapping)...\n", .{});
-    const args2 = [_][]const u8{
-        zzh_exe,
-        "testuser@127.0.0.1",
-        "-p", port_str,
-        "++password", "testpass",
-        "+xc", "/dev/null",
-        "+vv",
-        "+s", "zsh",
-        "++tmux",
-        "+hc", "tmux -V"
-    };
+    const args2 = [_][]const u8{ zzh_exe, "testuser@127.0.0.1", "-p", port_str, "++password", "testpass", "+xc", "/dev/null", "+vv", "+s", "zsh", "++tmux", "+hc", "tmux -V" };
     const out2 = try runZzh(allocator, &args2);
     defer allocator.free(out2);
     if (std.mem.indexOf(u8, out2, "tmux") == null) {
@@ -129,17 +101,7 @@ pub fn main() !void {
 
     // Test 3: Static Binary Provisioning E2E (+b)
     std.debug.print("Running Test 3 (Static Binary Provisioning - ripgrep)...\n", .{});
-    const args3 = [_][]const u8{
-        zzh_exe,
-        "testuser@127.0.0.1",
-        "-p", port_str,
-        "++password", "testpass",
-        "+xc", "/dev/null",
-        "+vv",
-        "+s", "zsh",
-        "+b", "BurntSushi/ripgrep",
-        "+hc", "rg --version"
-    };
+    const args3 = [_][]const u8{ zzh_exe, "testuser@127.0.0.1", "-p", port_str, "++password", "testpass", "+xc", "/dev/null", "+vv", "+s", "zsh", "+b", "BurntSushi/ripgrep", "+hc", "rg --version" };
     const out3 = try runZzh(allocator, &args3);
     defer allocator.free(out3);
     if (std.mem.indexOf(u8, out3, "ripgrep") == null) {
@@ -158,16 +120,7 @@ pub fn main() !void {
 
     // Test 4: Native Dotfiles (+d)
     std.debug.print("Running Test 4 (Native Dotfiles)... \n", .{});
-    const args4 = [_][]const u8{
-        zzh_exe,
-        "testuser@127.0.0.1",
-        "-p", port_str,
-        "++password", "testpass",
-        "+xc", "/dev/null",
-        "+s", "zsh",
-        "+d", e2e_dotfile_path,
-        "+hc", "cat e2e_dotfile"
-    };
+    const args4 = [_][]const u8{ zzh_exe, "testuser@127.0.0.1", "-p", port_str, "++password", "testpass", "+xc", "/dev/null", "+s", "zsh", "+d", e2e_dotfile_path, "+hc", "cat e2e_dotfile" };
     const out4 = try runZzh(allocator, &args4);
     defer allocator.free(out4);
     if (std.mem.indexOf(u8, out4, test_dotfile_content) == null) {
@@ -178,16 +131,7 @@ pub fn main() !void {
 
     // Test 5: xxh-plugin-prerun-dotfiles
     std.debug.print("Running Test 5 (xxh-plugin-prerun-dotfiles)...\n", .{});
-    const args5 = [_][]const u8{
-        zzh_exe,
-        "testuser@127.0.0.1",
-        "-p", port_str,
-        "++password", "testpass",
-        "+xc", "/dev/null",
-        "+s", "zsh",
-        "+I", "xxh-plugin-prerun-dotfiles",
-        "+hc", "echo PLUGIN_DOTFILES_SUCCESS"
-    };
+    const args5 = [_][]const u8{ zzh_exe, "testuser@127.0.0.1", "-p", port_str, "++password", "testpass", "+xc", "/dev/null", "+s", "zsh", "+I", "xxh-plugin-prerun-dotfiles", "+hc", "echo PLUGIN_DOTFILES_SUCCESS" };
     const out5 = try runZzh(allocator, &args5);
     defer allocator.free(out5);
     if (std.mem.indexOf(u8, out5, "PLUGIN_DOTFILES_SUCCESS") == null) {
@@ -198,16 +142,7 @@ pub fn main() !void {
 
     // Test 6: Shell-Specific Plugin (zsh-autosuggestions)
     std.debug.print("Running Test 6 (Shell-Specific Plugin - zsh-autosuggestions)...\n", .{});
-    const args6 = [_][]const u8{
-        zzh_exe,
-        "testuser@127.0.0.1",
-        "-p", port_str,
-        "++password", "testpass",
-        "+xc", "/dev/null",
-        "+s", "zsh",
-        "+I", "xxh-plugin-zsh-autosuggestions",
-        "+hc", "echo ZSH_AUTO_SUCCESS"
-    };
+    const args6 = [_][]const u8{ zzh_exe, "testuser@127.0.0.1", "-p", port_str, "++password", "testpass", "+xc", "/dev/null", "+s", "zsh", "+I", "xxh-plugin-zsh-autosuggestions", "+hc", "echo ZSH_AUTO_SUCCESS" };
     const out6 = try runZzh(allocator, &args6);
     defer allocator.free(out6);
     if (std.mem.indexOf(u8, out6, "ZSH_AUTO_SUCCESS") == null) {
@@ -218,17 +153,7 @@ pub fn main() !void {
 
     // Test 7: Multiple Plugins
     std.debug.print("Running Test 7 (Multiple Plugins)...\n", .{});
-    const args7 = [_][]const u8{
-        zzh_exe,
-        "testuser@127.0.0.1",
-        "-p", port_str,
-        "++password", "testpass",
-        "+xc", "/dev/null",
-        "+s", "zsh",
-        "+I", "xxh-plugin-zsh-example",
-        "+I", "xxh-plugin-prerun-core",
-        "+hc", "echo MULTI_PLUGIN_SUCCESS"
-    };
+    const args7 = [_][]const u8{ zzh_exe, "testuser@127.0.0.1", "-p", port_str, "++password", "testpass", "+xc", "/dev/null", "+s", "zsh", "+I", "xxh-plugin-zsh-example", "+I", "xxh-plugin-prerun-core", "+hc", "echo MULTI_PLUGIN_SUCCESS" };
     const out7 = try runZzh(allocator, &args7);
     defer allocator.free(out7);
     if (std.mem.indexOf(u8, out7, "MULTI_PLUGIN_SUCCESS") == null) {

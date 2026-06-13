@@ -7,7 +7,7 @@ pub const ConnectionEndpoint = struct {
     port: ?[]const u8 = null,
 };
 
-/// Parses a connection endpoint string (e.g., 'ssh://user@host:port' or 'user@host:port') 
+/// Parses a connection endpoint string (e.g., 'ssh://user@host:port' or 'user@host:port')
 /// into its structural parts.
 pub fn parseConnectionEndpoint(destination_uri: []const u8) ConnectionEndpoint {
     var raw_uri = destination_uri;
@@ -47,7 +47,7 @@ pub const OperationalConfig = struct {
     envb: std.ArrayList([]const u8),
     dotfiles: std.ArrayList([]const u8),
     binaries: std.ArrayList([]const u8),
-    
+
     // config & home paths
     config_path: ?[]const u8 = null,
     local_zzh_home: ?[]const u8 = null,
@@ -55,22 +55,22 @@ pub const OperationalConfig = struct {
     host_zzh_home_remove: bool = false,
     host_home: ?[]const u8 = null,
     host_home_xdg: ?[]const u8 = null,
-    
+
     // installation control flags
     install: bool = false,
     install_force: bool = false,
     install_force_full: bool = false,
-    
+
     // execution command control properties
     host_execute_file: ?[]const u8 = null,
     host_execute_command: ?[]const u8 = null,
     host_execute_bash: std.ArrayList([]const u8),
-    
+
     // logging & verbosity settings
     verbose: bool = false,
     vverbose: bool = false,
     quiet: bool = false,
-    
+
     // package caching and removal operations
     install_zzh_packages: std.ArrayList([]const u8),
     list_zzh_packages: std.ArrayList([]const u8),
@@ -82,7 +82,7 @@ pub const OperationalConfig = struct {
     list_binaries: bool = false,
     extract_sourcing_files: bool = false,
     update_packages: bool = false,
-    
+
     // SSH connection configurations
     ssh_port: ?[]const u8 = null,
     ssh_login: ?[]const u8 = null,
@@ -92,14 +92,14 @@ pub const OperationalConfig = struct {
     ssh_command: ?[]const u8 = null,
     password: ?[]const u8 = null,
     password_prompt: bool = false,
-    
+
     // subprocess tuning settings
     pexpect_timeout: ?[]const u8 = null,
     copy_method: ?[]const u8 = null,
     scp_command: ?[]const u8 = null,
     pexpect_disable: bool = false,
     config_init: bool = false,
-    
+
     // target and pass-through arguments
     destination: ?[]const u8 = null,
     ssh_args: std.ArrayList([]const u8),
@@ -182,7 +182,7 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
     while (token_idx < tokens.len) {
         const token = tokens[token_idx];
         if (settings.verbose or settings.vverbose) {
-            std.debug.print("Processing CLI token: '{s}' (index: {d})\n", .{token, token_idx});
+            std.debug.print("Processing CLI token: '{s}' (index: {d})\n", .{ token, token_idx });
         }
         if (std.mem.eql(u8, token, "+h") or std.mem.eql(u8, token, "++help")) {
             settings.help = true;
@@ -554,42 +554,35 @@ test "CLI Parsing Test - Short Forms and Core SSH Options" {
     defer args.deinit();
 
     const cli_args = [_][]const u8{
-        "-p", "2222",
-        "-l", "myuser",
-        "-i", "id_rsa",
-        "-J", "jump_host",
-        "-o", "Option1=Val1",
-        "-o", "Option2=Val2",
-        "+c", "et",
-        "+P", "secretpass",
-        "+PP",
-        "+i",
-        "+if",
-        "+iff",
-        "+xc", "config_file.yml",
-        "+e", "ENV_VAR1=val1",
-        "+eb", "ENV_VAR2=val2_b64",
-        "+lh", "/local/home",
-        "+hh", "/host/home",
-        "+hhr",
-        "+hhh", "/user/home",
-        "+hhx", "/xdg/config",
-        "+hf", "script.sh",
-        "+hc", "echo hello",
-        "+heb", "echo before",
-        "+s", "zsh",
-        "+v",
-        "+vv",
-        "+q",
-        "+I", "pkg_a",
-        "+RI", "pkg_b",
-        "+R", "pkg_c",
-        "+LS",
-        "+LP",
-        "+LB",
-        "+ES",
-        "user@myhost",
-        "-extra-ssh-arg",
+        "-p",          "2222",
+        "-l",          "myuser",
+        "-i",          "id_rsa",
+        "-J",          "jump_host",
+        "-o",          "Option1=Val1",
+        "-o",          "Option2=Val2",
+        "+c",          "et",
+        "+P",          "secretpass",
+        "+PP",         "+i",
+        "+if",         "+iff",
+        "+xc",         "config_file.yml",
+        "+e",          "ENV_VAR1=val1",
+        "+eb",         "ENV_VAR2=val2_b64",
+        "+lh",         "/local/home",
+        "+hh",         "/host/home",
+        "+hhr",        "+hhh",
+        "/user/home",  "+hhx",
+        "/xdg/config", "+hf",
+        "script.sh",   "+hc",
+        "echo hello",  "+heb",
+        "echo before", "+s",
+        "zsh",         "+v",
+        "+vv",         "+q",
+        "+I",          "pkg_a",
+        "+RI",         "pkg_b",
+        "+R",          "pkg_c",
+        "+LS",         "+LP",
+        "+LB",         "+ES",
+        "user@myhost", "-extra-ssh-arg",
     };
 
     try populateConfigFromTokens(testing.allocator, &cli_args, &args);
@@ -646,39 +639,33 @@ test "CLI Parsing Test - Long Forms and Other Options" {
     defer args.deinit();
 
     const cli_args = [_][]const u8{
-        "++ssh-command", "et_long",
-        "++password", "secretpass_long",
-        "++password-prompt",
-        "++install",
-        "++install-force",
-        "++install-force-full",
-        "++zzh-config", "config_file_long.yml",
-        "++env", "ENV_VAR1=val1_long",
-        "++envb", "ENV_VAR2=val2_b64_long",
-        "++local-zzh-home", "/local/home/long",
-        "++host-zzh-home", "/host/home/long",
-        "++host-zzh-home-remove",
-        "++host-home", "/user/home/long",
-        "++host-home-xdg", "/xdg/config/long",
-        "++host-execute-file", "script_long.sh",
-        "++host-execute-command", "echo hello long",
-        "++host-execute-bash", "echo before long",
-        "++shell", "fish",
-        "++verbose",
-        "++vverbose",
-        "++quiet",
+        "++ssh-command",          "et_long",
+        "++password",             "secretpass_long",
+        "++password-prompt",      "++install",
+        "++install-force",        "++install-force-full",
+        "++zzh-config",           "config_file_long.yml",
+        "++env",                  "ENV_VAR1=val1_long",
+        "++envb",                 "ENV_VAR2=val2_b64_long",
+        "++local-zzh-home",       "/local/home/long",
+        "++host-zzh-home",        "/host/home/long",
+        "++host-zzh-home-remove", "++host-home",
+        "/user/home/long",        "++host-home-xdg",
+        "/xdg/config/long",       "++host-execute-file",
+        "script_long.sh",         "++host-execute-command",
+        "echo hello long",        "++host-execute-bash",
+        "echo before long",       "++shell",
+        "fish",                   "++verbose",
+        "++vverbose",             "++quiet",
         "++install-zzh-packages", "pkg_a_long",
-        "++list-zzh-packages", "pkg_list_a", "pkg_list_b",
-        "++reinstall-zzh-packages", "pkg_b_long",
-        "++remove-zzh-packages", "pkg_c_long",
-        "++list-shells",
-        "++list-plugins",
-        "++extract-sourcing-files",
-        "++pexpect-timeout", "10",
-        "++copy-method", "rsync",
-        "++scp-command", "scp_custom",
-        "++pexpect-disable",
-        "user@host_long",
+        "++list-zzh-packages",    "pkg_list_a",
+        "pkg_list_b",             "++reinstall-zzh-packages",
+        "pkg_b_long",             "++remove-zzh-packages",
+        "pkg_c_long",             "++list-shells",
+        "++list-plugins",         "++extract-sourcing-files",
+        "++pexpect-timeout",      "10",
+        "++copy-method",          "rsync",
+        "++scp-command",          "scp_custom",
+        "++pexpect-disable",      "user@host_long",
     };
 
     try populateConfigFromTokens(testing.allocator, &cli_args, &args);
@@ -759,8 +746,7 @@ test "CLI Parsing Test - Unrecognized options and corner cases" {
 
     const cli_args = [_][]const u8{
         "-D", "9090",
-        "-z",
-        "user@host",
+        "-z", "user@host",
     };
 
     try populateConfigFromTokens(testing.allocator, &cli_args, &args);

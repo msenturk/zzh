@@ -4,6 +4,7 @@ const config = @import("config.zig");
 const package = @import("package.zig");
 const bundler = @import("bundler.zig");
 const deploy = @import("deploy.zig");
+const builtin = @import("builtin");
 
 /// Lists all custom static binaries installed locally.
 fn listBinaries(allocator: std.mem.Allocator, custom_zzh_home: ?[]const u8) !void {
@@ -202,11 +203,10 @@ pub fn main() !void {
             try args_list.append(try allocator.dupe(u8, arg));
         }
     }
-    
-    // We intercept `--internal-setsid` calls to cleanly spawn child terminals 
+
+    // We intercept `--internal-setsid` calls to cleanly spawn child terminals
     // within their own session process group (preventing HUP signal propagation on Linux targets).
     if (args_list.items.len > 0 and std.mem.eql(u8, args_list.items[0], "--internal-setsid")) {
-        const builtin = @import("builtin");
         if (builtin.os.tag == .linux) {
             _ = std.os.linux.syscall0(.setsid);
         } else if (builtin.os.tag != .windows) {
@@ -263,16 +263,14 @@ pub fn main() !void {
         return;
     }
 
-    const is_offline_package_management = preliminary_arguments.destination == null and (
-        preliminary_arguments.has_list_zzh_packages or
+    const is_offline_package_management = preliminary_arguments.destination == null and (preliminary_arguments.has_list_zzh_packages or
         preliminary_arguments.list_shells or
         preliminary_arguments.list_plugins or
         preliminary_arguments.list_binaries or
         preliminary_arguments.install_zzh_packages.items.len > 0 or
         preliminary_arguments.reinstall_zzh_packages.items.len > 0 or
         preliminary_arguments.remove_zzh_packages.items.len > 0 or
-        preliminary_arguments.update_packages
-    );
+        preliminary_arguments.update_packages);
 
     if (preliminary_arguments.destination == null and !is_offline_package_management) {
         printHelp();
@@ -362,7 +360,7 @@ pub fn main() !void {
 
         for (operational_settings.remove_zzh_packages.items) |pkg_name| {
             var deleted = false;
-            
+
             const is_shell = std.mem.indexOf(u8, pkg_name, "-shell-") != null;
             const category_dir = if (is_shell) "shells" else "plugins";
             const package_vitals = try package.fetchPackageVitals(allocator, pkg_name, is_shell);
@@ -454,6 +452,13 @@ pub fn main() !void {
     for (operational_settings.binaries.items) |repo| {
         std.debug.print("      - Binaries: {s}\n", .{repo});
     }
+    for (operational_settings.dotfiles.items) |dotfile| {
+        std.debug.print("      - Dotfile: {s}\n", .{dotfile});
+    }
+    if (operational_settings.dotfiles.items.len == 0 and !operational_settings.quiet) {
+        std.debug.print("      - Note: No dotfiles configured. " ++
+            "Add '+d ~/.bashrc' or set dotfiles in config.zzhc\n", .{});
+    }
 
     const resolved_shell = try package.fetchPackageVitals(allocator, shell_name, true);
     defer package.releasePackageVitals(allocator, resolved_shell);
@@ -478,22 +483,17 @@ pub fn main() !void {
         try cached_plugin_directories.append(plugin_path);
     }
 
-    // Query for user password securely before archiving and launching connections 
-    // if passwordless access fails and no password was passed on command line.
-    if (operational_settings.password == null) {
+    // Query for user password securely on Windows before launching connections
+    // if passwordless access fails and no password was passed on the command line.
+    // On Unix, SSH multiplexing is enabled, so we can let SSH prompt natively
+    // once and reuse the connection, avoiding the extra check handshake latency.
+    if (builtin.os.tag == .windows and operational_settings.password == null) {
         if (!try deploy.checkPasswordless(allocator, &operational_settings)) {
             var prompt_buffer: [256]u8 = undefined;
             const user_prompt = try std.fmt.bufPrint(&prompt_buffer, "{s}'s password: ", .{operational_settings.destination.?});
             const input_password = try cli.readMaskedPasswordFromTerminal(allocator, user_prompt);
             operational_settings.password = input_password;
         }
-    }
-
-    if (operational_settings.dotfiles.items.len == 0 and !operational_settings.quiet) {
-        std.debug.print(
-            "      - Note: No dotfiles configured. " ++
-            "Add '+d ~/.bashrc' or set dotfiles in config.zzhc\n", .{}
-        );
     }
 
     try deploy.deployAndConnect(

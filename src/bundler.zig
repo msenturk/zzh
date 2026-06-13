@@ -84,7 +84,7 @@ fn invokeLocalBuildScript(allocator: std.mem.Allocator, package_path: []const u8
             const argv = if (builtin.os.tag == .windows)
                 &[_][]const u8{ "bash", "build.sh" }
             else
-                &[_][]const u8{ "./build.sh" };
+                &[_][]const u8{"./build.sh"};
 
             var build_process = std.process.Child.init(argv, allocator);
             build_process.cwd = package_path;
@@ -125,8 +125,11 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
     defer tarball_filename.deinit();
     try tarball_filename.writer().print("payload-{s}.tar", .{payload_hash});
     const tarball_output_path = try std.fs.path.join(allocator, &.{ home_dir, ".zzh", "tmp", tarball_filename.items });
+    var tarball_was_created = false;
     errdefer {
-        std.fs.deleteFileAbsolute(tarball_output_path) catch {};
+        if (tarball_was_created) {
+            std.fs.deleteFileAbsolute(tarball_output_path) catch {};
+        }
         allocator.free(tarball_output_path);
     }
 
@@ -150,6 +153,8 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
             .tarball_output_path = tarball_output_path,
         };
     }
+
+    tarball_was_created = true;
 
     std.debug.print("[3/4] Building payload archive...\n", .{});
 
@@ -306,17 +311,15 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
         }
     }
 
+    const local_base_dir = if (zzh_args.local_zzh_home) |lh|
+        try config.expandUserPath(allocator, lh)
+    else
+        try std.fs.path.join(allocator, &.{ home_dir, ".zzh" });
+    defer allocator.free(local_base_dir);
+
     // Bundle the local tmux binary at tarball root as bin/tmux if ++tmux is active
     if (zzh_args.tmux) {
-        var base_dir: []const u8 = undefined;
-        if (zzh_args.local_zzh_home) |lh| {
-            base_dir = try config.expandUserPath(allocator, lh);
-        } else {
-            base_dir = try std.fs.path.join(allocator, &.{ home_dir, ".zzh" });
-        }
-        defer allocator.free(base_dir);
-
-        const local_tmux = try std.fs.path.join(allocator, &.{ base_dir, "bin", "tmux" });
+        const local_tmux = try std.fs.path.join(allocator, &.{ local_base_dir, "bin", "tmux" });
         defer allocator.free(local_tmux);
 
         var tmux_exists = false;
@@ -343,17 +346,9 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
 
     // Cache any requested command line binaries (like rg or fd) in the payload workspace.
     if (zzh_args.binaries.items.len > 0) {
-        var base_dir: []const u8 = undefined;
-        if (zzh_args.local_zzh_home) |lh| {
-            base_dir = try config.expandUserPath(allocator, lh);
-        } else {
-            base_dir = try std.fs.path.join(allocator, &.{ home_dir, ".zzh" });
-        }
-        defer allocator.free(base_dir);
-
         for (zzh_args.binaries.items) |repo| {
             const bin_name = package.extractExecutableName(repo);
-            const local_bin = try std.fs.path.join(allocator, &.{ base_dir, "bin", bin_name });
+            const local_bin = try std.fs.path.join(allocator, &.{ local_base_dir, "bin", bin_name });
             defer allocator.free(local_bin);
 
             var bin_exists = false;
@@ -468,10 +463,10 @@ test "Payload Bundler Test - with build subdirectories and build.sh" {
     // Create a dummy plugin directory with build.sh
     var tmp_plugin_dir = testing.tmpDir(.{});
     defer tmp_plugin_dir.cleanup();
-    
+
     // Create build.sh that exits 0
     try tmp_plugin_dir.dir.writeFile(.{ .sub_path = "build.sh", .data = "#!/bin/sh\nmkdir -p build && echo 'echo plugin' > build/init.sh\n" });
-    
+
     var shell_buf: [1024]u8 = undefined;
     const shell_path = try tmp_shell_dir.dir.realpath(".", &shell_buf);
 

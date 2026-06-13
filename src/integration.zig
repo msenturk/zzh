@@ -5,7 +5,7 @@ const package = @import("package.zig");
 const bundler = @import("bundler.zig");
 const deploy = @import("deploy.zig");
 
-// Integration tests ensure that config override hierarchies, payload staging, 
+// Integration tests ensure that config override hierarchies, payload staging,
 // and remote command compiling layers work in harmony without regression.
 
 test "Integration: CLI Overrides Config" {
@@ -86,7 +86,7 @@ test "Integration: Payload Bundler layout and file copying" {
     var dummy_args = @import("cli.zig").OperationalConfig.init(testing.allocator);
     dummy_args.install_force = true;
     defer dummy_args.deinit();
-    
+
     // We execute the payload builder to verify that shell assets, plugin initializers,
     // and directories are placed in their correct relative structures inside the archive.
     const result = try bundler.assembleDeploymentPayload(testing.allocator, shell_path, &plugin_paths, &dummy_args);
@@ -125,7 +125,7 @@ test "Integration: Remote command generation and quoting" {
     try args.env.append(try testing.allocator.dupe(u8, "C=D E F"));
     args.verbose = true;
 
-    // Verifies that environmental configurations and payload expansion parameters 
+    // Verifies that environmental configurations and payload expansion parameters
     // are correctly compiled and escaped into safe SSH deployment commands.
     const staged_script = try deploy.compileStagedScript(testing.allocator, &args);
     defer staged_script.deinit(testing.allocator);
@@ -150,6 +150,3 @@ test "Integration: Host regex pattern translation and matching" {
     try testing.expect(config.hostMatchesPattern(testing.allocator, "my-exact-host", "my-exact-host"));
     try testing.expect(!config.hostMatchesPattern(testing.allocator, "my-exact-host", "my-exact-host-2"));
 }
-
-
-
