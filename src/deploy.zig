@@ -176,11 +176,11 @@ pub fn compileStagedScript(allocator: std.mem.Allocator, zzh_args: *const cli.Op
     // prepend zzh's bin directory and common system paths to the remote PATH 
     // so our static binaries (like tmux/rg) take precedence while keeping standard tools available.
     {
-        const path_val = "$XXH_HOME/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH";
-        const path_val_b64 = try b64Encode(allocator, path_val);
-        defer allocator.free(path_val_b64);
-        try session_builder.appendSlice(" -e PATH=");
-        try session_builder.appendSlice(path_val_b64);
+        const cmd = "export PATH=\"$XXH_HOME/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH\"";
+        const cmd_b64 = try b64Encode(allocator, cmd);
+        defer allocator.free(cmd_b64);
+        try session_builder.appendSlice(" -b ");
+        try session_builder.appendSlice(cmd_b64);
     }
 
     for (zzh_args.env.items) |e| {
@@ -567,12 +567,12 @@ pub fn detectRemoteTarget(allocator: std.mem.Allocator, zzh_args: *const cli.Ope
         try runner_args.append(dest_info.host);
     }
 
-    try runner_args.append("uname -s && uname -m");
+    try runner_args.append("echo ZZH_TARGET_START && uname -s && uname -m && echo ZZH_TARGET_END");
 
     var child = std.process.Child.init(runner_args.items, allocator);
     child.env_map = &env_map;
     child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Ignore;
+    child.stderr_behavior = .Inherit;
 
     try child.spawn();
 
@@ -593,17 +593,38 @@ pub fn detectRemoteTarget(allocator: std.mem.Allocator, zzh_args: *const cli.Ope
     }
 
     var lines_it = std.mem.tokenizeAny(u8, out_buf.items, "\r\n");
-    const os_line = lines_it.next() orelse return error.RemoteTargetDetectionFailed;
-    const arch_line = lines_it.next() orelse return error.RemoteTargetDetectionFailed;
+    
+    var os_line: ?[]const u8 = null;
+    var arch_line: ?[]const u8 = null;
+    var inside_target_block = false;
 
-    const trimmed_os = std.mem.trim(u8, os_line, " \t");
-    const trimmed_arch = std.mem.trim(u8, arch_line, " \t");
+    while (lines_it.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, " \t");
+        if (std.mem.eql(u8, trimmed, "ZZH_TARGET_START")) {
+            inside_target_block = true;
+            continue;
+        }
+        if (std.mem.eql(u8, trimmed, "ZZH_TARGET_END")) {
+            break;
+        }
+        if (inside_target_block) {
+            if (os_line == null) {
+                os_line = trimmed;
+            } else if (arch_line == null) {
+                arch_line = trimmed;
+            }
+        }
+    }
 
-    const os = try allocator.alloc(u8, trimmed_os.len);
+    if (os_line == null or arch_line == null) {
+        return error.RemoteTargetDetectionFailed;
+    }
+
+    const os = try allocator.alloc(u8, os_line.?.len);
     errdefer allocator.free(os);
-    _ = std.ascii.lowerString(os, trimmed_os);
+    _ = std.ascii.lowerString(os, os_line.?);
 
-    const arch = try normalizeArch(allocator, trimmed_arch);
+    const arch = try normalizeArch(allocator, arch_line.?);
 
     return RemoteTarget{
         .os = os,
