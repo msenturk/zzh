@@ -469,6 +469,14 @@ pub fn buildSshBoilerplate(allocator: std.mem.Allocator, zzh_args: *const cli.Op
         const opt = try std.fmt.allocPrint(allocator, "User={s}", .{l});
         defer allocator.free(opt);
         try ssh_boilerplate.append(try allocator.dupe(u8, opt));
+    } else if (zzh_args.destination) |dest| {
+        const dest_info = cli.parseConnectionEndpoint(dest);
+        if (dest_info.user) |u| {
+            try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
+            const opt = try std.fmt.allocPrint(allocator, "User={s}", .{u});
+            defer allocator.free(opt);
+            try ssh_boilerplate.append(try allocator.dupe(u8, opt));
+        }
     }
 
     if (zzh_args.ssh_jump_host) |j| {
@@ -569,6 +577,14 @@ pub fn detectRemoteTarget(allocator: std.mem.Allocator, zzh_args: *const cli.Ope
 
     try runner_args.append("echo ZZH_TARGET_START && uname -s && uname -m && echo ZZH_TARGET_END");
 
+    if (zzh_args.verbose or zzh_args.vverbose) {
+        std.debug.print("Detecting remote target with command:", .{});
+        for (runner_args.items) |arg| {
+            std.debug.print(" {s}", .{arg});
+        }
+        std.debug.print("\n", .{});
+    }
+
     var child = std.process.Child.init(runner_args.items, allocator);
     child.env_map = &env_map;
     child.stdout_behavior = .Pipe;
@@ -589,6 +605,9 @@ pub fn detectRemoteTarget(allocator: std.mem.Allocator, zzh_args: *const cli.Ope
 
     const term = try child.wait();
     if (term != .Exited or term.Exited != 0) {
+        if (zzh_args.verbose or zzh_args.vverbose) {
+            std.debug.print("Remote target detection failed with exit code or signal. Output: {s}\n", .{out_buf.items});
+        }
         return error.RemoteTargetDetectionFailed;
     }
 
