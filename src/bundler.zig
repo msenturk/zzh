@@ -103,9 +103,10 @@ fn invokeLocalBuildScript(allocator: std.mem.Allocator, package_path: []const u8
 }
 
 // Thread entrypoint wrapper to run the local package build process concurrently.
-fn concurrentBuildWorker(allocator: std.mem.Allocator, package_path: []const u8) void {
+fn concurrentBuildWorker(allocator: std.mem.Allocator, package_path: []const u8, has_failed: *std.atomic.Value(bool)) void {
     invokeLocalBuildScript(allocator, package_path) catch |err| {
         std.debug.print("Error running build script for {s}: {}\n", .{ package_path, err });
+        has_failed.store(true, .monotonic);
     };
 }
 
@@ -124,7 +125,10 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
     defer tarball_filename.deinit();
     try tarball_filename.writer().print("payload-{s}.tar", .{payload_hash});
     const tarball_output_path = try std.fs.path.join(allocator, &.{ home_dir, ".zzh", "tmp", tarball_filename.items });
-    errdefer allocator.free(tarball_output_path);
+    errdefer {
+        std.fs.deleteFileAbsolute(tarball_output_path) catch {};
+        allocator.free(tarball_output_path);
+    }
 
     // Reuse existing payload if cached to speed up the connection sequence.
     if (pathExists(tarball_output_path) and !zzh_args.install_force and !zzh_args.install_force_full) {
@@ -155,7 +159,10 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
     const temp_name = try std.fmt.bufPrint(&staging_folder_name, "zzh-build-{x}", .{random_id});
 
     const staging_area_path = try std.fs.path.join(allocator, &.{ home_dir, ".zzh", "tmp", temp_name });
-    errdefer allocator.free(staging_area_path);
+    errdefer {
+        std.fs.deleteTreeAbsolute(staging_area_path) catch {};
+        allocator.free(staging_area_path);
+    }
 
     const tmp_parent_dir = try std.fs.path.join(allocator, &.{ home_dir, ".zzh", "tmp" });
     defer allocator.free(tmp_parent_dir);
@@ -194,17 +201,23 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
     }
     try duplicateDirectory(allocator, shell_source_dir, dest_shell_dir);
 
+    var plugin_build_failed = std.atomic.Value(bool).init(false);
+
     // Build all requested plugins concurrently using separate background worker threads.
     var plugin_build_threads = std.ArrayList(std.Thread).init(allocator);
     defer plugin_build_threads.deinit();
 
     for (plugin_paths) |plugin_path| {
-        const build_thread = try std.Thread.spawn(.{}, concurrentBuildWorker, .{ allocator, plugin_path });
+        const build_thread = try std.Thread.spawn(.{}, concurrentBuildWorker, .{ allocator, plugin_path, &plugin_build_failed });
         try plugin_build_threads.append(build_thread);
     }
 
     for (plugin_build_threads.items) |t| {
         t.join();
+    }
+
+    if (plugin_build_failed.load(.monotonic)) {
+        return error.PluginBuildFailed;
     }
 
     // Stage plugin folders into the payload directory.
@@ -527,9 +540,8 @@ test "Payload Bundler Test - build script failure and errdefer" {
     var stub_cli_arguments = @import("cli.zig").OperationalConfig.init(testing.allocator);
     stub_cli_arguments.install_force = true;
     defer stub_cli_arguments.deinit();
-    // With parallel build threads, build.sh errors are caught and logged per-thread,
-    // not propagated as a top-level error. The payload still builds successfully.
-    const manifest = try assembleDeploymentPayload(testing.allocator, shell_path, &plugin_paths, &stub_cli_arguments);
-    defer discardStagingArea(testing.allocator, manifest);
-    try testing.expect(manifest.tarball_output_path.len > 0);
+    // With parallel build threads, build.sh errors are propagated via atomic flags.
+    // The payload build should fail with error.PluginBuildFailed.
+    const result = assembleDeploymentPayload(testing.allocator, shell_path, &plugin_paths, &stub_cli_arguments);
+    try testing.expectError(error.PluginBuildFailed, result);
 }

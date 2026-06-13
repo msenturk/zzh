@@ -59,7 +59,7 @@ pub noinline fn normalizePackageIdentifier(allocator: std.mem.Allocator, name: [
                 } else {
                     // This is unreachable by design because plugin_short is a prefix of name,
                     // and name does not start with "xxh-plugin-".
-                    unreachable;
+                    @panic("plugin_short prefix invariant violated");
                 }
             } else {
                 return std.fmt.allocPrint(allocator, "xxh-plugin-{s}", .{name});
@@ -682,7 +682,6 @@ pub fn provisionStaticallyCompiledBinary(
     repo_input: []const u8,
     install_force: bool,
     local_xxh_home: ?[]const u8,
-    config_path: ?[]const u8,
     target_os: []const u8,
     target_arch: []const u8,
 ) !void {
@@ -716,82 +715,29 @@ pub fn provisionStaticallyCompiledBinary(
     const builtin = @import("builtin");
     const curl_cmd = if (builtin.os.tag == .windows) "curl.exe" else "curl";
 
-    var resolved_repo_input = repo_input;
-    var custom_url_allocated = false;
-    defer {
-        if (custom_url_allocated) allocator.free(resolved_repo_input);
-    }
-
-    if (config_path) |cp| {
-        const expanded_config_path = try config.expandUserPath(allocator, cp);
-        defer allocator.free(expanded_config_path);
-
-        var lookup_name = repo_input;
-        if (std.mem.indexOfScalar(u8, repo_input, '@')) |idx| {
-            lookup_name = repo_input[0..idx];
-        }
-        if (try config.lookupBinaryUrlInConfig(allocator, expanded_config_path, lookup_name, target_arch)) |url| {
-            resolved_repo_input = url;
-            custom_url_allocated = true;
-        } else if (try config.lookupBinaryUrlInConfig(allocator, expanded_config_path, bin_name, target_arch)) |url| {
-            resolved_repo_input = url;
-            custom_url_allocated = true;
-        } else if (std.mem.indexOfScalar(u8, lookup_name, '/')) |idx| {
-            const short_repo_name = lookup_name[idx + 1 ..];
-            if (try config.lookupBinaryUrlInConfig(allocator, expanded_config_path, short_repo_name, target_arch)) |url| {
-                resolved_repo_input = url;
-                custom_url_allocated = true;
-            }
-        }
-
-        if (!custom_url_allocated) {
-            if (try config.isBinaryDefaultUrlEnabled(expanded_config_path, lookup_name) or
-                try config.isBinaryDefaultUrlEnabled(expanded_config_path, bin_name))
-            {
-                if (try config.getBuiltinDefaultUrlForBinary(allocator, lookup_name, target_arch)) |url| {
-                    resolved_repo_input = url;
-                    custom_url_allocated = true;
-                } else if (try config.getBuiltinDefaultUrlForBinary(allocator, bin_name, target_arch)) |url| {
-                    resolved_repo_input = url;
-                    custom_url_allocated = true;
-                }
-            } else if (std.mem.indexOfScalar(u8, lookup_name, '/')) |idx| {
-                const short_repo_name = lookup_name[idx + 1 ..];
-                if (try config.isBinaryDefaultUrlEnabled(expanded_config_path, short_repo_name)) {
-                    if (try config.getBuiltinDefaultUrlForBinary(allocator, lookup_name, target_arch)) |url| {
-                        resolved_repo_input = url;
-                        custom_url_allocated = true;
-                    }
-                }
-            }
-        }
-    }
+    const resolved_repo_input = repo_input;
 
     var is_direct_url = false;
     if (std.mem.startsWith(u8, resolved_repo_input, "http://") or std.mem.startsWith(u8, resolved_repo_input, "https://")) {
-        if (custom_url_allocated) {
-            is_direct_url = true;
+        var path = resolved_repo_input;
+        if (std.mem.startsWith(u8, path, "https://github.com/")) {
+            path = path["https://github.com/".len..];
+        } else if (std.mem.startsWith(u8, path, "http://github.com/")) {
+            path = path["http://github.com/".len..];
         } else {
-            var path = resolved_repo_input;
-            if (std.mem.startsWith(u8, path, "https://github.com/")) {
-                path = path["https://github.com/".len..];
-            } else if (std.mem.startsWith(u8, path, "http://github.com/")) {
-                path = path["http://github.com/".len..];
-            } else {
-                is_direct_url = true;
-            }
+            is_direct_url = true;
+        }
 
-            if (!is_direct_url) {
-                while (path.len > 0 and path[path.len - 1] == '/') {
-                    path = path[0 .. path.len - 1];
-                }
-                var slash_count: usize = 0;
-                for (path) |char| {
-                    if (char == '/') slash_count += 1;
-                }
-                if (slash_count > 1) {
-                    is_direct_url = true;
-                }
+        if (!is_direct_url) {
+            while (path.len > 0 and path[path.len - 1] == '/') {
+                path = path[0 .. path.len - 1];
+            }
+            var slash_count: usize = 0;
+            for (path) |char| {
+                if (char == '/') slash_count += 1;
+            }
+            if (slash_count > 1) {
+                is_direct_url = true;
             }
         }
     }

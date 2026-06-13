@@ -489,48 +489,19 @@ pub fn main() !void {
         }
     }
 
-    var remote_target: ?deploy.RemoteTarget = null;
-    defer {
-        if (remote_target) |rt| {
-            allocator.free(rt.os);
-            allocator.free(rt.arch);
-        }
-    }
-
-    if (operational_settings.tmux or operational_settings.binaries.items.len > 0) {
-        std.debug.print("      - Detecting remote host system architecture...\n", .{});
-        remote_target = try deploy.detectRemoteTarget(allocator, &operational_settings);
-    }
-
-    if (operational_settings.tmux) {
-        const target = remote_target.?;
-        const cached_tmux_path = try package.provisionStaticallyCompiledTmux(
-            allocator,
-            operational_settings.install_force,
-            operational_settings.local_zzh_home,
-            target.arch,
-        );
-        allocator.free(cached_tmux_path);
-    }
-
-    for (operational_settings.binaries.items) |repo| {
-        const target = remote_target.?;
-        try package.provisionStaticallyCompiledBinary(
-            allocator,
-            repo,
-            operational_settings.install_force,
-            operational_settings.local_zzh_home,
-            operational_settings.config_path orelse "~/.config/zzh/config.zzhc",
-            target.os,
-            target.arch,
+    if (operational_settings.dotfiles.items.len == 0 and !operational_settings.quiet) {
+        std.debug.print(
+            "      - Note: No dotfiles configured. " ++
+            "Add '+d ~/.bashrc' or set dotfiles in config.zzhc\n", .{}
         );
     }
 
-    // Staging and creating plain tar bundle file to deploy.
-    const deployment_bundle = try bundler.assembleDeploymentPayload(allocator, cached_shell_directory, cached_plugin_directories.items, &operational_settings);
-    defer bundler.discardStagingArea(allocator, deployment_bundle);
-
-    try deploy.deployAndConnect(allocator, &operational_settings, deployment_bundle.tarball_output_path, deployment_bundle.staging_area_path);
+    try deploy.deployAndConnect(
+        allocator,
+        &operational_settings,
+        cached_shell_directory,
+        cached_plugin_directories.items,
+    );
 }
 
 test "simple test" {

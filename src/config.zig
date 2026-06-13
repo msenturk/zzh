@@ -160,6 +160,16 @@ fn isBooleanConfigKey(key: []const u8) bool {
 
 /// Reads the config.zzhc file and parses the host matching rules into a flat slice of arguments.
 /// The config format is YAML-like, using indents to define sections, host matching patterns, and values.
+///
+/// INDENTATION CONTRACT & EXPECTATIONS:
+/// - This parser defines block structure and scopes strictly based on the line indentation depth:
+///   - Depth 0: Root configuration block headers (e.g. `hosts:` and `settings:`).
+///   - Depth 2: Host pattern scopes defining targeting rules (e.g. `".*":` or `"127.0.0.1":`).
+///   - Depth 4: Settings keys containing key-value configurations or starting lists (e.g. `+s: bash`).
+///   - Depth > 4: Nested list items (prefixed with `- `) under a list-initiating key (e.g. `- ~/.bashrc`).
+/// - Tab characters (`\t`) are converted to exactly 4 spaces (` `) to compute the depth.
+/// - WARNING: Non-standard indentation depths or mixing spaces and tabs in a way that deviates from 
+///   the exact depths listed above can cause config parsing misdetection or structural confusion.
 pub noinline fn readAndParseConfigurationFile(
     allocator: std.mem.Allocator,
     file_path: []const u8,
@@ -317,203 +327,6 @@ pub noinline fn readAndParseConfigurationFile(
     }
 }
 
-fn replaceArchPlaceholder(allocator: std.mem.Allocator, raw_url: []const u8, target_arch: []const u8) ![]const u8 {
-    var result = std.ArrayList(u8).init(allocator);
-    errdefer result.deinit();
-
-    var remaining = raw_url;
-    while (true) {
-        if (std.mem.indexOf(u8, remaining, "{arch}")) |index| {
-            try result.appendSlice(remaining[0..index]);
-            try result.appendSlice(target_arch);
-            remaining = remaining[index + "{arch}".len ..];
-        } else {
-            try result.appendSlice(remaining);
-            break;
-        }
-    }
-    return result.toOwnedSlice();
-}
-
-/// Looks up a custom download URL for a given binary name or repository input under the 'bin_urls:' block.
-pub fn lookupBinaryUrlInConfig(
-    allocator: std.mem.Allocator,
-    file_path: []const u8,
-    binary_name: []const u8,
-    target_arch: []const u8,
-) !?[]const u8 {
-    const configuration_file = std.fs.openFileAbsolute(file_path, .{}) catch |err| {
-        if (err == error.FileNotFound) return null;
-        return err;
-    };
-    defer configuration_file.close();
-
-    var buffer_reader = std.io.bufferedReader(configuration_file.reader());
-    var line_stream = buffer_reader.reader();
-
-    var line_buffer: [4096]u8 = undefined;
-    var within_bin_urls_block = false;
-
-    while (try line_stream.readUntilDelimiterOrEof(&line_buffer, '\n')) |raw_line| {
-        var line: []const u8 = raw_line;
-        if (line.len > 0 and line[line.len - 1] == '\r') {
-            line = line[0 .. line.len - 1];
-        }
-        line = stripCommentsFromLine(line);
-
-        var indentation_depth: usize = 0;
-        for (line) |char| {
-            if (char == ' ') {
-                indentation_depth += 1;
-            } else if (char == '\t') {
-                indentation_depth += 4;
-            } else {
-                break;
-            }
-        }
-
-        const trimmed_line = std.mem.trim(u8, line, " \t\r");
-        if (trimmed_line.len == 0 or trimmed_line[0] == '#') {
-            continue;
-        }
-
-        if (indentation_depth == 0) {
-            if (std.mem.startsWith(u8, trimmed_line, "bin_urls:")) {
-                within_bin_urls_block = true;
-            } else {
-                within_bin_urls_block = false;
-            }
-            continue;
-        }
-
-        if (within_bin_urls_block and indentation_depth > 0) {
-            if (std.mem.indexOfScalar(u8, trimmed_line, ':')) |colon_idx| {
-                const key = stripSurroundingQuotes(std.mem.trim(u8, trimmed_line[0..colon_idx], " \t"));
-                const val = stripSurroundingQuotes(std.mem.trim(u8, trimmed_line[colon_idx + 1 ..], " \t"));
-                if (std.mem.eql(u8, key, binary_name) and val.len > 0) {
-                    return try replaceArchPlaceholder(allocator, val, target_arch);
-                }
-            }
-        }
-    }
-
-    return null;
-}
-
-/// Returns a built-in default download URL for specific well-known binaries.
-pub fn getBuiltinDefaultUrlForBinary(allocator: std.mem.Allocator, name: []const u8, target_arch: []const u8) !?[]const u8 {
-    var clean_name = name;
-    if (std.mem.indexOfScalar(u8, name, '@')) |idx| {
-        clean_name = name[0..idx];
-    }
-
-    if (std.mem.eql(u8, clean_name, "BurntSushi/ripgrep") or 
-        std.mem.eql(u8, clean_name, "ripgrep") or 
-        std.mem.eql(u8, clean_name, "rg")) {
-        const url = try std.fmt.allocPrint(allocator, "https://github.com/BurntSushi/ripgrep/releases/download/13.0.0/ripgrep-13.0.0-{s}-unknown-linux-musl.tar.gz", .{target_arch});
-        return url;
-    }
-
-    if (std.mem.eql(u8, clean_name, "sharkdp/fd") or 
-        std.mem.eql(u8, clean_name, "fd")) {
-        const url = try std.fmt.allocPrint(allocator, "https://github.com/sharkdp/fd/releases/download/v8.7.0/fd-v8.7.0-{s}-unknown-linux-musl.tar.gz", .{target_arch});
-        return url;
-    }
-
-    if (std.mem.eql(u8, clean_name, "sharkdp/bat") or 
-        std.mem.eql(u8, clean_name, "bat")) {
-        const url = try std.fmt.allocPrint(allocator, "https://github.com/sharkdp/bat/releases/download/v0.24.0/bat-v0.24.0-{s}-unknown-linux-musl.tar.gz", .{target_arch});
-        return url;
-    }
-
-    return null;
-}
-
-fn canonicalizeBinaryName(name: []const u8) []const u8 {
-    var clean = name;
-    if (std.mem.indexOfScalar(u8, clean, '@')) |idx| {
-        clean = clean[0..idx];
-    }
-    if (std.mem.indexOfScalar(u8, clean, '/')) |idx| {
-        clean = clean[idx + 1 ..];
-    }
-    if (std.mem.eql(u8, clean, "ripgrep")) {
-        return "rg";
-    }
-    return clean;
-}
-
-/// Checks if a static binary's default built-in URL has been enabled under the 'bin_urls:' block.
-pub fn isBinaryDefaultUrlEnabled(
-    file_path: []const u8,
-    binary_name: []const u8,
-) !bool {
-    const configuration_file = std.fs.openFileAbsolute(file_path, .{}) catch |err| {
-        if (err == error.FileNotFound) return false;
-        return err;
-    };
-    defer configuration_file.close();
-
-    var buffer_reader = std.io.bufferedReader(configuration_file.reader());
-    var line_stream = buffer_reader.reader();
-
-    var line_buffer: [4096]u8 = undefined;
-    var within_bin_urls_block = false;
-
-    const canonical_lookup = canonicalizeBinaryName(binary_name);
-
-    while (try line_stream.readUntilDelimiterOrEof(&line_buffer, '\n')) |raw_line| {
-        var line: []const u8 = raw_line;
-        if (line.len > 0 and line[line.len - 1] == '\r') {
-            line = line[0 .. line.len - 1];
-        }
-        line = stripCommentsFromLine(line);
-
-        var indentation_depth: usize = 0;
-        for (line) |char| {
-            if (char == ' ') {
-                indentation_depth += 1;
-            } else if (char == '\t') {
-                indentation_depth += 4;
-            } else {
-                break;
-            }
-        }
-
-        const trimmed_line = std.mem.trim(u8, line, " \t\r");
-        if (trimmed_line.len == 0 or trimmed_line[0] == '#') {
-            continue;
-        }
-
-        if (indentation_depth == 0) {
-            if (std.mem.startsWith(u8, trimmed_line, "bin_urls:")) {
-                within_bin_urls_block = true;
-            } else {
-                within_bin_urls_block = false;
-            }
-            continue;
-        }
-
-        if (within_bin_urls_block and indentation_depth > 0) {
-            var val = trimmed_line;
-            if (std.mem.startsWith(u8, val, "- ")) {
-                val = std.mem.trim(u8, val[2..], " \t");
-            } else if (std.mem.indexOfScalar(u8, val, ':')) |colon_idx| {
-                val = std.mem.trim(u8, val[0..colon_idx], " \t");
-            }
-            val = stripSurroundingQuotes(val);
-            if (std.mem.endsWith(u8, val, ":")) {
-                val = std.mem.trim(u8, val[0 .. val.len - 1], " \t");
-            }
-
-            if (std.mem.eql(u8, val, binary_name) or std.mem.eql(u8, canonicalizeBinaryName(val), canonical_lookup)) {
-                return true;
-            }
-        }
-    }
-
-    return false;
-}
 
 
 /// Creates a default config.zzhc file under ~/.config/zzh/ if it doesn't already exist.
@@ -555,45 +368,40 @@ pub fn initializeDefaultConfigurationFile(allocator: std.mem.Allocator, custom_c
     const default_content =
         \\# zzh Configuration File (config.zzhc)
         \\#
-        \\# This file configures default shells, plugins, dotfiles, and binary utilities per-host.
         \\# Host names are matched using wildcard/glob patterns and merged sequentially.
         \\
-        \\# Global application settings
         \\settings:
-        \\  # Path to local zzh packages and binary cache (default: ~/.zzh)
         \\  local_zzh_home: "~/.zzh"
-        \\  # Target remote execution directory (default: ~/.zzh)
         \\  host_zzh_home: "~/.zzh"
-        \\  # Path to configuration file (default: ~/.config/zzh/config.zzhc)
         \\  config_path: "~/.config/zzh/config.zzhc"
-        \\
-        \\# Custom download links for static binaries. 
-        \\# Bypasses the GitHub API lookup when downloading binaries using the '+b' command-line flag or hosts configuration.
-        \\bin_urls:
-        \\  BurntSushi/ripgrep: "https://github.com/BurntSushi/ripgrep/releases/download/13.0.0/ripgrep-13.0.0-{arch}-unknown-linux-musl.tar.gz"
-        \\  sharkdp/fd: "https://github.com/sharkdp/fd/releases/download/v8.7.0/fd-v8.7.0-{arch}-unknown-linux-musl.tar.gz"
-        \\  sharkdp/bat: "https://github.com/sharkdp/bat/releases/download/v0.24.0/bat-v0.24.0-{arch}-unknown-linux-musl.tar.gz"
         \\
         \\hosts:
         \\  # Default settings applied to every connection.
         \\  ".*":
-        \\    +s: bash                        # Default shell to install and enter
+        \\    +s: bash
         \\    +d:
         \\      - ~/.bashrc
         \\      - ~/.bash_aliases
-        \\    +b:
-        \\      - BurntSushi/ripgrep
-        \\      - sharkdp/bat
-        \\    ++tmux: true
-        \\    +hhh: "~"                       # Remote base directory for payload execution
+        \\    # +b:
+        \\    #   - ripgrep        # searches GitHub automatically
+        \\    #   - bat
+        \\    #   - jq
+        \\    # ++tmux: true
         \\
-        \\  # Local testing configurations.
-        \\  "127.0.0.1":
-        \\    -p: 2222                        # Port for local test container
-        \\    -i: ~/.ssh/xhh_test_key
-        \\    +e:                             # Inject custom environment variables
-        \\      - LANG="C.UTF-8"
-        \\      - LC_ALL="C.UTF-8"
+        \\  # Local testing example - customize as needed.
+        \\  # "127.0.0.1":
+        \\  #   -p: 2222
+        \\  #   +e:
+        \\  #     - LANG="C.UTF-8"
+        \\  #     - LC_ALL="C.UTF-8"
+        \\
+        \\  # Production servers example.
+        \\  # "prod-server-*":
+        \\  #   ++tmux: true
+        \\  #   ++tmux-session: prod
+        \\  #   +b:
+        \\  #     - ripgrep
+        \\  #     - fd
         \\
     ;
 
@@ -766,17 +574,13 @@ test "Config Parsing Test - Extra cases and environments" {
     try testing.expectError(error.StreamTooLong, long_res);
 }
 
-test "Config Parsing Test - Settings and Binary URLs" {
+test "Config Parsing Test - Settings" {
     const testing = std.testing;
     const config_content =
         \\settings:
         \\  local_zzh_home: "~/.myzzh"
         \\  host_zzh_home: "/custom/home"
         \\  config_path: "/custom/config.zzhc"
-        \\bin_urls:
-        \\  BurntSushi/ripgrep: "https://example.com/ripgrep-{arch}.tar.gz"
-        \\  sharkdp/fd: "https://example.com/fd-{arch}.tar.gz"
-        \\  - "some/other-tool"
         \\hosts:
         \\  "myhost":
         \\    +s: xonsh
@@ -808,36 +612,6 @@ test "Config Parsing Test - Settings and Binary URLs" {
     try testing.expectEqualStrings("/custom/config.zzhc", args_list.items[5]);
     try testing.expectEqualStrings("+s", args_list.items[6]);
     try testing.expectEqualStrings("xonsh", args_list.items[7]);
-
-    // Test binary default url enabled check
-    try testing.expect(try isBinaryDefaultUrlEnabled(absolute_path, "BurntSushi/ripgrep"));
-    try testing.expect(try isBinaryDefaultUrlEnabled(absolute_path, "ripgrep"));
-    try testing.expect(try isBinaryDefaultUrlEnabled(absolute_path, "rg"));
-    try testing.expect(try isBinaryDefaultUrlEnabled(absolute_path, "sharkdp/fd"));
-    try testing.expect(try isBinaryDefaultUrlEnabled(absolute_path, "fd"));
-    try testing.expect(try isBinaryDefaultUrlEnabled(absolute_path, "some/other-tool"));
-    try testing.expect(!try isBinaryDefaultUrlEnabled(absolute_path, "missing"));
-
-    // Test custom URL lookup with {arch} substitution
-    const arch_str = switch (@import("builtin").cpu.arch) {
-        .x86_64 => "x86_64",
-        .aarch64 => "aarch64",
-        else => "x86_64",
-    };
-
-    const lookup_url = try lookupBinaryUrlInConfig(testing.allocator, absolute_path, "BurntSushi/ripgrep", arch_str);
-    try testing.expect(lookup_url != null);
-    const expected_rg_url = try std.fmt.allocPrint(testing.allocator, "https://example.com/ripgrep-{s}.tar.gz", .{arch_str});
-    defer testing.allocator.free(expected_rg_url);
-    try testing.expectEqualStrings(expected_rg_url, lookup_url.?);
-    testing.allocator.free(lookup_url.?);
-
-    const lookup_fd = try lookupBinaryUrlInConfig(testing.allocator, absolute_path, "sharkdp/fd", arch_str);
-    try testing.expect(lookup_fd != null);
-    const expected_fd_url = try std.fmt.allocPrint(testing.allocator, "https://example.com/fd-{s}.tar.gz", .{arch_str});
-    defer testing.allocator.free(expected_fd_url);
-    try testing.expectEqualStrings(expected_fd_url, lookup_fd.?);
-    testing.allocator.free(lookup_fd.?);
 }
 
 test "initializeDefaultConfigurationFile Test" {

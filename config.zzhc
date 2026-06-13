@@ -34,7 +34,7 @@ hosts:
   # Local testing configurations.
   "127.0.0.1":
     -p: 2222                        # Port for local test container
-    -i: ~/.ssh/xhh_test_key
+  #  -i: ~/.ssh/xhh_test_key
     # +if:                            # Force reinstall packages on each connection
     +e:                             # Inject custom environment variables
       - LANG="C.UTF-8"

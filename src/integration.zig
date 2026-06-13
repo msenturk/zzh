@@ -132,7 +132,7 @@ test "Integration: Remote command generation and quoting" {
     const cmd = try std.mem.join(testing.allocator, " && ", &.{ staged_script.bootstrap_script, staged_script.session_script });
     defer testing.allocator.free(cmd);
 
-    try testing.expectEqualStrings("mkdir -p ~/'.zzh' && tar -xmf - -C ~/'.zzh' && ln -sf .zzh ~/'.zzh'/.xxh && chmod -R +x ~/'.zzh' 2>/dev/null || true && ~/'.zzh'/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -b ZXhwb3J0IFBBVEg9IiRYWEhfSE9NRS9iaW46L3Vzci9sb2NhbC9zYmluOi91c3IvbG9jYWwvYmluOi91c3Ivc2JpbjovdXNyL2Jpbjovc2JpbjovYmluOiRQQVRIIg== -e A=Qg== -e C=RCBFIEY= -H ~", cmd);
+    try testing.expectEqualStrings("mkdir -p ~/'.zzh' && tar -xmf - -C ~/'.zzh' && ln -sf .zzh ~/'.zzh'/.xxh && chmod -R +x ~/'.zzh' 2>/dev/null || true && ~/'.zzh'/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -b ZXhwb3J0IFpaSF9IT01FPSd+Ly56emgnOyBleHBvcnQgWFhIX0hPTUU9J34vLnp6aCc7IGV4cG9ydCBQQVRIPSJ+Ly56emgvYmluOi91c3IvbG9jYWwvc2JpbjovdXNyL2xvY2FsL2JpbjovdXNyL3NiaW46L3Vzci9iaW46L3NiaW46L2JpbjokUEFUSCI= -e A=Qg== -e C=RCBFIEY= -H ~", cmd);
 }
 
 test "Integration: Host regex pattern translation and matching" {
@@ -151,36 +151,5 @@ test "Integration: Host regex pattern translation and matching" {
     try testing.expect(!config.hostMatchesPattern(testing.allocator, "my-exact-host", "my-exact-host-2"));
 }
 
-test "Integration: provisionStaticallyCompiledBinary Custom URL Fallback" {
-    const testing = std.testing;
 
-    const config_content =
-        \\bin_urls:
-        \\  BurntSushi/ripgrep: https://127.0.0.1:9999/ripgrep-custom.tar.gz
-    ;
-
-    var tmp_dir = testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
-
-    try tmp_dir.dir.writeFile(.{ .sub_path = "config.zzhc", .data = config_content });
-
-    var path_buf: [1024]u8 = undefined;
-    const absolute_config_path = try tmp_dir.dir.realpath("config.zzhc", &path_buf);
-
-    var local_home_buf: [1024]u8 = undefined;
-    const mock_local_home = try tmp_dir.dir.realpath(".", &local_home_buf);
-
-    const result = package.provisionStaticallyCompiledBinary(
-        testing.allocator,
-        "BurntSushi/ripgrep",
-        true, // force install
-        mock_local_home,
-        absolute_config_path,
-        "linux",
-        "x86_64",
-    );
-
-    // Since curl will fail to connect/download, we expect CommandFailed
-    try testing.expectError(error.CommandFailed, result);
-}
 
