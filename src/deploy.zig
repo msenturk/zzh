@@ -453,37 +453,32 @@ pub fn buildSshBoilerplate(allocator: std.mem.Allocator, zzh_args: *const cli.Op
     if (zzh_args.ssh_port) |p| {
         try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
         const opt = try std.fmt.allocPrint(allocator, "Port={s}", .{p});
-        defer allocator.free(opt);
-        try ssh_boilerplate.append(try allocator.dupe(u8, opt));
+        try ssh_boilerplate.append(opt);
     }
 
     if (zzh_args.ssh_private_key) |k| {
         try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
         const opt = try std.fmt.allocPrint(allocator, "IdentityFile={s}", .{k});
-        defer allocator.free(opt);
-        try ssh_boilerplate.append(try allocator.dupe(u8, opt));
+        try ssh_boilerplate.append(opt);
     }
 
     if (zzh_args.ssh_login) |l| {
         try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
         const opt = try std.fmt.allocPrint(allocator, "User={s}", .{l});
-        defer allocator.free(opt);
-        try ssh_boilerplate.append(try allocator.dupe(u8, opt));
+        try ssh_boilerplate.append(opt);
     } else if (zzh_args.destination) |dest| {
         const dest_info = cli.parseConnectionEndpoint(dest);
         if (dest_info.user) |u| {
             try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
             const opt = try std.fmt.allocPrint(allocator, "User={s}", .{u});
-            defer allocator.free(opt);
-            try ssh_boilerplate.append(try allocator.dupe(u8, opt));
+            try ssh_boilerplate.append(opt);
         }
     }
 
     if (zzh_args.ssh_jump_host) |j| {
         try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
         const opt = try std.fmt.allocPrint(allocator, "ProxyJump={s}", .{j});
-        defer allocator.free(opt);
-        try ssh_boilerplate.append(try allocator.dupe(u8, opt));
+        try ssh_boilerplate.append(opt);
     }
 
     for (zzh_args.ssh_options.items) |o| {
@@ -904,7 +899,11 @@ pub fn deployAndConnect(allocator: std.mem.Allocator, zzh_args: *const cli.Opera
         try interactive_session_args.append(arg);
     }
     // -t is required to allocate a pseudo-terminal for interactive shells
-    try interactive_session_args.append("-t");
+    if (zzh_args.tmux) {
+        try interactive_session_args.append("-tt");
+    } else if (zzh_args.host_execute_command == null and zzh_args.host_execute_file == null) {
+        try interactive_session_args.append("-t");
+    }
     if (zzh_args.destination) |dest| {
         const dest_info = cli.parseConnectionEndpoint(dest);
         try interactive_session_args.append(dest_info.host);

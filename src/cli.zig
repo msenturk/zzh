@@ -181,7 +181,10 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
     var token_idx: usize = 0;
     while (token_idx < tokens.len) {
         const token = tokens[token_idx];
-        if (std.mem.eql(u8, token, "-h") or std.mem.eql(u8, token, "--help")) {
+        if (settings.verbose or settings.vverbose) {
+            std.debug.print("Processing CLI token: '{s}' (index: {d})\n", .{token, token_idx});
+        }
+        if (std.mem.eql(u8, token, "+h") or std.mem.eql(u8, token, "++help")) {
             settings.help = true;
         } else if (std.mem.eql(u8, token, "-p")) {
             token_idx += 1;
@@ -322,7 +325,7 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
             settings.vverbose = true;
         } else if (std.mem.eql(u8, token, "+q") or std.mem.eql(u8, token, "++quiet") or std.mem.eql(u8, token, "+quiet")) {
             settings.quiet = true;
-        } else if (std.mem.eql(u8, token, "+I") or std.mem.eql(u8, token, "++install-zzh-packages") or std.mem.eql(u8, token, "++install-plugin") or std.mem.eql(u8, token, "+install-plugin")) {
+        } else if (std.mem.eql(u8, token, "+I") or std.mem.eql(u8, token, "++install-zzh-packages") or std.mem.eql(u8, token, "++install-plugin") or std.mem.eql(u8, token, "+install-plugin") or std.mem.eql(u8, token, "+p")) {
             token_idx += 1;
             if (token_idx < tokens.len) {
                 try settings.install_zzh_packages.append(try allocator.dupe(u8, tokens[token_idx]));

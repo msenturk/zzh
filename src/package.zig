@@ -196,27 +196,25 @@ fn gitCloneSubdirectoryOnly(allocator: std.mem.Allocator, package_name: []const 
             const branch = rest[0..slash_idx];
             const subfolder = rest[slash_idx + 1 ..];
 
-            std.debug.print("      - Downloading {s} (tarball fallback)...\n", .{package_name});
+            std.debug.print("      - Downloading {s} (fallback repository)...\n", .{package_name});
             
             const tmp_target_dir = try std.fmt.allocPrint(allocator, "{s}_tmp", .{target_dir});
             defer allocator.free(tmp_target_dir);
+            std.fs.deleteTreeAbsolute(tmp_target_dir) catch {};
 
-            // 1. Depth-1 clone without checking out files immediately.
-            const argv1 = [_][]const u8{ "git", "clone", "--no-checkout", "--depth=1", "--filter=tree:0", "-b", branch, repo_url, tmp_target_dir };
-            try executeSubprocess(allocator, &argv1);
-
-            // 2. Configure sparse checkout constraints.
-            const argv2 = [_][]const u8{ "git", "-C", tmp_target_dir, "sparse-checkout", "set", "--no-cone", subfolder };
-            try executeSubprocess(allocator, &argv2);
-
-            // 3. Checkout the targeted folder layout.
-            const argv3 = [_][]const u8{ "git", "-C", tmp_target_dir, "checkout" };
-            try executeSubprocess(allocator, &argv3);
+            // 1. Full depth-1 clone of the branch.
+            const clone_argv = [_][]const u8{ "git", "clone", "--depth=1", "-b", branch, repo_url, tmp_target_dir };
+            try executeSubprocess(allocator, &clone_argv);
 
             const extracted_folder = try std.fs.path.join(allocator, &.{ tmp_target_dir, subfolder });
             defer allocator.free(extracted_folder);
 
-            try std.fs.renameAbsolute(extracted_folder, target_dir);
+            // 2. Ensure target_dir doesn't exist before moving to avoid nesting.
+            std.fs.deleteTreeAbsolute(target_dir) catch {};
+
+            // 3. Move the subdirectory to the target location.
+            const mv_argv = [_][]const u8{ "mv", extracted_folder, target_dir };
+            try executeSubprocess(allocator, &mv_argv);
 
             std.fs.deleteTreeAbsolute(tmp_target_dir) catch {};
         } else {
@@ -822,7 +820,7 @@ pub fn provisionStaticallyCompiledBinary(
                 allocator.free(temp_extract_path);
             }
 
-            const download_argv = [_][]const u8{ curl_cmd, "-fsSL", "-o", archive_path, resolved_repo_input };
+            const download_argv = [_][]const u8{ curl_cmd, "-fsSL", "--connect-timeout", "2", "--max-time", "120", "-o", archive_path, resolved_repo_input };
             try executeSubprocess(allocator, &download_argv);
 
             try ensureDirectoryPath(temp_extract_path);
@@ -919,7 +917,7 @@ pub fn provisionStaticallyCompiledBinary(
 
     std.debug.print("      - Fetching release info from GitHub API...\n", .{});
 
-    const api_argv = [_][]const u8{ curl_cmd, "-fsSL", "-H", "User-Agent: zzh-client", api_url };
+    const api_argv = [_][]const u8{ curl_cmd, "-fsSL", "--connect-timeout", "2", "--max-time", "10", "-H", "User-Agent: zzh-client", api_url };
     
     const json_bytes = try executeSubprocessAndCaptureOutput(allocator, &api_argv);
     defer allocator.free(json_bytes);
@@ -951,28 +949,38 @@ pub fn provisionStaticallyCompiledBinary(
     }
 
     std.debug.print("      - Downloading {s}...\n", .{asset.name});
-    const download_argv = [_][]const u8{ curl_cmd, "-fsSL", "-o", archive_path, asset.browser_download_url };
+    const download_argv = [_][]const u8{ curl_cmd, "-fsSL", "--connect-timeout", "2", "--max-time", "120", "-o", archive_path, asset.browser_download_url };
     try executeSubprocess(allocator, &download_argv);
 
-    try ensureDirectoryPath(temp_extract_path);
-    
-    std.debug.print("      - Extracting archive...\n", .{});
-    const tar_cmd = if (builtin.os.tag == .windows) "tar.exe" else "tar";
-    const tar_argv = [_][]const u8{ tar_cmd, "-xf", archive_path, "-C", temp_extract_path };
-    try executeSubprocess(allocator, &tar_argv);
+    const is_tarball = std.mem.endsWith(u8, asset.browser_download_url, ".tar.gz") or std.mem.endsWith(u8, asset.browser_download_url, ".tgz") or std.mem.endsWith(u8, asset.browser_download_url, ".tar") or std.mem.endsWith(u8, asset.name, ".tar.gz") or std.mem.endsWith(u8, asset.name, ".tgz") or std.mem.endsWith(u8, asset.name, ".tar");
 
-    std.debug.print("      - Locating binary file '{s}'...\n", .{bin_name});
-    const found_bin_path = try searchDirectoryForFile(allocator, temp_extract_path, bin_name);
-    if (found_bin_path) |fbp| {
-        defer allocator.free(fbp);
-        try std.fs.copyFileAbsolute(fbp, dest_bin_path, .{});
+    if (is_tarball) {
+        try ensureDirectoryPath(temp_extract_path);
+        std.debug.print("      - Extracting archive...\n", .{});
+        const tar_cmd = if (builtin.os.tag == .windows) "tar.exe" else "tar";
+        const tar_argv = [_][]const u8{ tar_cmd, "-xf", archive_path, "-C", temp_extract_path };
+        try executeSubprocess(allocator, &tar_argv);
+
+        std.debug.print("      - Locating binary file '{s}'...\n", .{bin_name});
+        const found_bin_path = try searchDirectoryForFile(allocator, temp_extract_path, bin_name);
+        if (found_bin_path) |fbp| {
+            defer allocator.free(fbp);
+            try std.fs.copyFileAbsolute(fbp, dest_bin_path, .{});
+            if (builtin.os.tag != .windows) {
+                const chmod_argv = [_][]const u8{ "chmod", "+x", dest_bin_path };
+                try executeSubprocess(allocator, &chmod_argv);
+            }
+            std.debug.print("      - Extracting and caching to ~/.zzh/bin/{s}...\n", .{bin_name});
+        } else {
+            return error.BinaryNotFoundInArchive;
+        }
+    } else {
+        std.debug.print("      - Using plain binary...\n", .{});
+        try std.fs.copyFileAbsolute(archive_path, dest_bin_path, .{});
         if (builtin.os.tag != .windows) {
             const chmod_argv = [_][]const u8{ "chmod", "+x", dest_bin_path };
             try executeSubprocess(allocator, &chmod_argv);
         }
-        std.debug.print("      - Extracting and caching to ~/.zzh/bin/{s}...\n", .{bin_name});
-    } else {
-        return error.BinaryNotFoundInArchive;
     }
 }
 
