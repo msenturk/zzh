@@ -392,10 +392,10 @@ use completions/zzh.nu
 |---|---|
 | `+s, ++shell <name>` | Shell to use (`zsh`, `fish`, `nu`, `xonsh`, `bash`) |
 | `+I <pkg>` | Install xxh package (`xxh-plugin-*`, `xxh-shell-*`, or `tmux`) |
-| `+b <repo>` | Install static binary from GitHub releases |
-| `+d <file>` | Sync dotfile/config — symlinked to `~/` on remote |
-| `+R <pkg>` | Remove cached package or binary |
-| `+L` | List installed packages |
+| `+b, ++binary <repo>` | Install static binary from GitHub releases |
+| `+d, ++dotfile <file>` | Sync dotfile/config — symlinked to `~/` on remote |
+| `+R, ++remove-zzh-packages <pkg>` | Remove cached package or binary |
+| `+L, ++list-zzh-packages` | List installed packages |
 | `+LS` / `+LP` / `+LB` | List installed shells / plugins / static binaries |
 | `++update` | Update all cached packages via `git pull` |
 | `++tmux` | Attach to persistent tmux session (auto-downloads tmux) |

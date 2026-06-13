@@ -188,42 +188,70 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
             settings.help = true;
         } else if (std.mem.eql(u8, token, "-p")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.ssh_port) |v| allocator.free(v);
                 settings.ssh_port = try allocator.dupe(u8, tokens[token_idx]);
             }
         } else if (std.mem.eql(u8, token, "-l")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.ssh_login) |v| allocator.free(v);
                 settings.ssh_login = try allocator.dupe(u8, tokens[token_idx]);
             }
         } else if (std.mem.eql(u8, token, "-i")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.ssh_private_key) |v| allocator.free(v);
                 settings.ssh_private_key = try allocator.dupe(u8, tokens[token_idx]);
             }
         } else if (std.mem.eql(u8, token, "-J")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.ssh_jump_host) |v| allocator.free(v);
                 settings.ssh_jump_host = try allocator.dupe(u8, tokens[token_idx]);
             }
         } else if (std.mem.eql(u8, token, "-o")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 try settings.ssh_options.append(try allocator.dupe(u8, tokens[token_idx]));
             }
         } else if (std.mem.eql(u8, token, "+c") or std.mem.eql(u8, token, "++ssh-command")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.ssh_command) |v| allocator.free(v);
                 settings.ssh_command = try allocator.dupe(u8, tokens[token_idx]);
             }
         } else if (std.mem.eql(u8, token, "+P") or std.mem.eql(u8, token, "++password")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.password) |v| allocator.free(v);
                 settings.password = try allocator.dupe(u8, tokens[token_idx]);
             }
@@ -237,7 +265,11 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
             settings.install_force_full = true;
         } else if (std.mem.eql(u8, token, "+xc") or std.mem.eql(u8, token, "++zzh-config") or std.mem.eql(u8, token, "++config")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.config_path) |v| allocator.free(v);
                 settings.config_path = try allocator.dupe(u8, tokens[token_idx]);
             }
@@ -245,17 +277,29 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
             settings.config_init = true;
         } else if (std.mem.eql(u8, token, "+e") or std.mem.eql(u8, token, "++env")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 try settings.env.append(try allocator.dupe(u8, tokens[token_idx]));
             }
         } else if (std.mem.eql(u8, token, "+eb") or std.mem.eql(u8, token, "++envb")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 try settings.envb.append(try allocator.dupe(u8, tokens[token_idx]));
             }
         } else if (std.mem.eql(u8, token, "+d") or std.mem.eql(u8, token, "++dotfile")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 try settings.dotfiles.append(try allocator.dupe(u8, tokens[token_idx]));
             }
         } else if (std.mem.eql(u8, token, "++update")) {
@@ -266,19 +310,31 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
             settings.tmux = false;
         } else if (std.mem.eql(u8, token, "++tmux-session")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.tmux_session) |v| allocator.free(v);
                 settings.tmux_session = try allocator.dupe(u8, tokens[token_idx]);
             }
         } else if (std.mem.eql(u8, token, "+lh") or std.mem.eql(u8, token, "++local-zzh-home")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.local_zzh_home) |v| allocator.free(v);
                 settings.local_zzh_home = try allocator.dupe(u8, tokens[token_idx]);
             }
         } else if (std.mem.eql(u8, token, "+hh") or std.mem.eql(u8, token, "++host-zzh-home")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.host_zzh_home) |v| allocator.free(v);
                 settings.host_zzh_home = try allocator.dupe(u8, tokens[token_idx]);
             }
@@ -286,36 +342,60 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
             settings.host_zzh_home_remove = true;
         } else if (std.mem.eql(u8, token, "+hhh") or std.mem.eql(u8, token, "++host-home")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.host_home) |v| allocator.free(v);
                 settings.host_home = try allocator.dupe(u8, tokens[token_idx]);
             }
         } else if (std.mem.eql(u8, token, "+hhx") or std.mem.eql(u8, token, "++host-home-xdg")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.host_home_xdg) |v| allocator.free(v);
                 settings.host_home_xdg = try allocator.dupe(u8, tokens[token_idx]);
             }
         } else if (std.mem.eql(u8, token, "+hf") or std.mem.eql(u8, token, "++host-execute-file")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.host_execute_file) |v| allocator.free(v);
                 settings.host_execute_file = try allocator.dupe(u8, tokens[token_idx]);
             }
         } else if (std.mem.eql(u8, token, "+hc") or std.mem.eql(u8, token, "++host-execute-command")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.host_execute_command) |v| allocator.free(v);
                 settings.host_execute_command = try allocator.dupe(u8, tokens[token_idx]);
             }
         } else if (std.mem.eql(u8, token, "+heb") or std.mem.eql(u8, token, "++host-execute-bash")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 try settings.host_execute_bash.append(try allocator.dupe(u8, tokens[token_idx]));
             }
         } else if (std.mem.eql(u8, token, "+s") or std.mem.eql(u8, token, "++shell") or std.mem.eql(u8, token, "+shell")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.shell) |v| allocator.free(v);
                 settings.shell = try allocator.dupe(u8, tokens[token_idx]);
             }
@@ -327,7 +407,11 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
             settings.quiet = true;
         } else if (std.mem.eql(u8, token, "+I") or std.mem.eql(u8, token, "++install-zzh-packages") or std.mem.eql(u8, token, "++install-plugin") or std.mem.eql(u8, token, "+install-plugin") or std.mem.eql(u8, token, "+p")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 try settings.install_zzh_packages.append(try allocator.dupe(u8, tokens[token_idx]));
                 try settings.plugins.append(try allocator.dupe(u8, tokens[token_idx]));
             }
@@ -343,17 +427,29 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
             }
         } else if (std.mem.eql(u8, token, "+RI") or std.mem.eql(u8, token, "++reinstall-zzh-packages")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 try settings.reinstall_zzh_packages.append(try allocator.dupe(u8, tokens[token_idx]));
             }
         } else if (std.mem.eql(u8, token, "+R") or std.mem.eql(u8, token, "++remove-zzh-packages")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 try settings.remove_zzh_packages.append(try allocator.dupe(u8, tokens[token_idx]));
             }
         } else if (std.mem.eql(u8, token, "+b") or std.mem.eql(u8, token, "++binary")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 try settings.binaries.append(try allocator.dupe(u8, tokens[token_idx]));
             }
         } else if (std.mem.eql(u8, token, "+LS") or std.mem.eql(u8, token, "++list-shells") or std.mem.eql(u8, token, "+list-shells")) {
@@ -366,19 +462,31 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
             settings.extract_sourcing_files = true;
         } else if (std.mem.eql(u8, token, "++pexpect-timeout")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.pexpect_timeout) |v| allocator.free(v);
                 settings.pexpect_timeout = try allocator.dupe(u8, tokens[token_idx]);
             }
         } else if (std.mem.eql(u8, token, "++copy-method")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.copy_method) |v| allocator.free(v);
                 settings.copy_method = try allocator.dupe(u8, tokens[token_idx]);
             }
         } else if (std.mem.eql(u8, token, "++scp-command")) {
             token_idx += 1;
-            if (token_idx < tokens.len) {
+            if (token_idx >= tokens.len) {
+                std.debug.print("Error: Missing argument for '{s}'\n", .{token});
+                std.process.exit(1);
+            }
+            if (true) {
                 if (settings.scp_command) |v| allocator.free(v);
                 settings.scp_command = try allocator.dupe(u8, tokens[token_idx]);
             }

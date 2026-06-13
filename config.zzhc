@@ -26,14 +26,14 @@ hosts:
     +d:
       - ~/.bashrc:.bashrc
       - ~/.bash_aliases:.bash_aliases
-    +b:
-      - BurntSushi/ripgrep
-      - sharkdp/bat
-      - jdx/mise
-      - direnv/direnv
-      - ajeetdsouza/zoxide
-    ++tmux: true
-    +hhh: "~"                       # Remote base directory for payload execution
+   # +b:
+   #   - BurntSushi/ripgrep
+   #   - sharkdp/bat
+   #   - jdx/mise
+   #   - direnv/direnv
+   #   - ajeetdsouza/zoxide
+   # ++tmux: true
+   # +hhh: "~"                       # Remote base directory for payload execution
 
   # Local testing configurations.
   "127.0.0.1":

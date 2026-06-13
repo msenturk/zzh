@@ -132,7 +132,7 @@ test "Integration: Remote command generation and quoting" {
     const cmd = try std.mem.join(testing.allocator, " && ", &.{ staged_script.bootstrap_script, staged_script.session_script });
     defer testing.allocator.free(cmd);
 
-    try testing.expectEqualStrings("mkdir -p ~'/.zzh' && tar -xmf - -C ~'/.zzh' && ln -sf .zzh ~'/.zzh'/.xxh && chmod -R +x ~'/.zzh' 2>/dev/null || true && ~'/.zzh'/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -e PATH=JFhYSF9IT01FL2JpbjokUEFUSA== -e A=Qg== -e C=RCBFIEY=", cmd);
+    try testing.expectEqualStrings("mkdir -p ~/'.zzh' && tar -xmf - -C ~/'.zzh' && ln -sf .zzh ~/'.zzh'/.xxh && chmod -R +x ~/'.zzh' 2>/dev/null || true && ~/'.zzh'/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -b ZXhwb3J0IFBBVEg9IiRYWEhfSE9NRS9iaW46L3Vzci9sb2NhbC9zYmluOi91c3IvbG9jYWwvYmluOi91c3Ivc2JpbjovdXNyL2Jpbjovc2JpbjovYmluOiRQQVRIIg== -e A=Qg== -e C=RCBFIEY= -H ~", cmd);
 }
 
 test "Integration: Host regex pattern translation and matching" {

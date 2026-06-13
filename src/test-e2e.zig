@@ -37,21 +37,28 @@ pub fn main() !void {
 
     std.debug.print("Running E2E tests...\n", .{});
 
-    // Start docker container
-    const docker_run = [_][]const u8{
-        "docker", "run", "-d", "--rm", "--name", "zzh-e2e-test",
-        "-p", "2222:2222",
+    const rand = std.crypto.random.int(u64);
+    const port_num = 40000 + (rand % 10000);
+    var port_mapping_b: [64]u8 = undefined;
+    const port_mapping = try std.fmt.bufPrint(&port_mapping_b, "{d}:2222", .{port_num});
+    var port_str_b: [16]u8 = undefined;
+    const port_str = try std.fmt.bufPrint(&port_str_b, "{d}", .{port_num});
+
+    std.debug.print("Starting podman container on port {d}...\n", .{port_num});
+    const podman_run = [_][]const u8{
+        "podman", "run", "-d", "--rm", "--replace", "--name", "zzh-e2e-test",
+        "-p", port_mapping,
         "-e", "USER_NAME=testuser",
         "-e", "USER_PASSWORD=testpass",
         "-e", "PASSWORD_ACCESS=true",
-        "linuxserver/openssh-server"
+        "lscr.io/linuxserver/openssh-server"
     };
 
-    std.debug.print("Starting docker container...\n", .{});
-    var child = std.process.Child.init(&docker_run, allocator);
+    std.debug.print("Starting podman container...\n", .{});
+    var child = std.process.Child.init(&podman_run, allocator);
     child.spawn() catch |err| {
         if (err == error.FileNotFound) {
-            std.debug.print("Docker not found. Skipping E2E test.\n", .{});
+            std.debug.print("Podman not found. Skipping E2E test.\n", .{});
             return;
         }
         return err;
@@ -59,8 +66,8 @@ pub fn main() !void {
     _ = try child.wait();
 
     defer {
-        const docker_rm = [_][]const u8{ "docker", "rm", "-f", "zzh-e2e-test" };
-        var rm_child = std.process.Child.init(&docker_rm, allocator);
+        const podman_rm = [_][]const u8{ "podman", "rm", "-f", "zzh-e2e-test" };
+        var rm_child = std.process.Child.init(&podman_rm, allocator);
         rm_child.spawn() catch {};
         _ = rm_child.wait() catch {};
     }
@@ -72,7 +79,7 @@ pub fn main() !void {
     // Install dependencies in container for plugin testing
     std.debug.print("Installing dependencies in test container (python3, git, curl)...\n", .{});
     const apk_args = [_][]const u8{
-        "docker", "exec", "zzh-e2e-test", "apk", "add", "--no-cache", "python3", "git", "curl"
+        "podman", "exec", "zzh-e2e-test", "apk", "add", "--no-cache", "python3", "git", "curl"
     };
     var apk_child = std.process.Child.init(&apk_args, allocator);
     _ = try apk_child.spawnAndWait();
@@ -84,8 +91,10 @@ pub fn main() !void {
     const args1 = [_][]const u8{
         zzh_exe,
         "testuser@127.0.0.1",
-        "-p", "2222",
+        "-p", port_str,
         "++password", "testpass",
+        "+xc", "/dev/null",
+        "+vv",
         "+s", "zsh",
         "+hc", "echo E2E_SUCCESS"
     };
@@ -102,8 +111,10 @@ pub fn main() !void {
     const args2 = [_][]const u8{
         zzh_exe,
         "testuser@127.0.0.1",
-        "-p", "2222",
+        "-p", port_str,
         "++password", "testpass",
+        "+xc", "/dev/null",
+        "+vv",
         "+s", "zsh",
         "++tmux",
         "+hc", "tmux -V"
@@ -121,8 +132,10 @@ pub fn main() !void {
     const args3 = [_][]const u8{
         zzh_exe,
         "testuser@127.0.0.1",
-        "-p", "2222",
+        "-p", port_str,
         "++password", "testpass",
+        "+xc", "/dev/null",
+        "+vv",
         "+s", "zsh",
         "+b", "BurntSushi/ripgrep",
         "+hc", "rg --version"
@@ -148,8 +161,9 @@ pub fn main() !void {
     const args4 = [_][]const u8{
         zzh_exe,
         "testuser@127.0.0.1",
-        "-p", "2222",
+        "-p", port_str,
         "++password", "testpass",
+        "+xc", "/dev/null",
         "+s", "zsh",
         "+d", e2e_dotfile_path,
         "+hc", "cat e2e_dotfile"
@@ -167,8 +181,9 @@ pub fn main() !void {
     const args5 = [_][]const u8{
         zzh_exe,
         "testuser@127.0.0.1",
-        "-p", "2222",
+        "-p", port_str,
         "++password", "testpass",
+        "+xc", "/dev/null",
         "+s", "zsh",
         "+I", "xxh-plugin-prerun-dotfiles",
         "+hc", "echo PLUGIN_DOTFILES_SUCCESS"
@@ -186,8 +201,9 @@ pub fn main() !void {
     const args6 = [_][]const u8{
         zzh_exe,
         "testuser@127.0.0.1",
-        "-p", "2222",
+        "-p", port_str,
         "++password", "testpass",
+        "+xc", "/dev/null",
         "+s", "zsh",
         "+I", "xxh-plugin-zsh-autosuggestions",
         "+hc", "echo ZSH_AUTO_SUCCESS"
@@ -205,8 +221,9 @@ pub fn main() !void {
     const args7 = [_][]const u8{
         zzh_exe,
         "testuser@127.0.0.1",
-        "-p", "2222",
+        "-p", port_str,
         "++password", "testpass",
+        "+xc", "/dev/null",
         "+s", "zsh",
         "+I", "xxh-plugin-zsh-example",
         "+I", "xxh-plugin-prerun-core",

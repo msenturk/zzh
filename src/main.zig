@@ -148,6 +148,8 @@ fn printHelp() void {
         \\  +L, ++list-zzh-packages            List installed packages
         \\  +RI, ++reinstall-zzh-packages      Reinstall package
         \\  +R, ++remove-zzh-packages          Remove package
+        \\  +b, ++binary <repo>                Install static binary from GitHub releases
+        \\  +LB, ++list-binaries               List installed static binaries
         \\  +LS, ++list-shells                 List installed shells
         \\  +LP, ++list-plugins                List installed plugins
         \\  ++update                           Update all cached packages (git pull)

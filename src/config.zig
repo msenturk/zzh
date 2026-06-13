@@ -546,7 +546,7 @@ pub fn initializeDefaultConfigurationFile(allocator: std.mem.Allocator, custom_c
         break :blk true;
     };
 
-    const standard_output = std.io.getStdOut().writer();
+    const standard_output = std.io.getStdErr().writer();
     if (file_exists) {
         try standard_output.print("Configuration file already exists at: {s}\n", .{config_path});
         return;
