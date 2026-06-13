@@ -494,14 +494,31 @@ fn promptUserSelectRepo(repos: []RepoSearchItem) !usize {
     var buf: [64]u8 = undefined;
     while (true) {
         try stdout.print("Enter selection [1-{d}]: ", .{repos.len});
-        const line = (try stdin.readUntilDelimiterOrEof(&buf, '\n')) orelse return error.UserInterrupted;
-        const trimmed = std.mem.trim(u8, line, " \t\r");
+        const line = stdin.readUntilDelimiterOrEof(&buf, '\n') catch |err| {
+            if (err == error.StreamTooLong) {
+                while (true) {
+                    const c = stdin.readByte() catch break;
+                    if (c == '\n') break;
+                }
+                try stdout.print("Input too long. Please try again.\n", .{});
+                continue;
+            }
+            return err;
+        };
+        
+        if (line == null) return error.UserInterrupted;
+        
+        const trimmed = std.mem.trim(u8, line.?, " \t\r");
+        if (trimmed.len == 0) continue;
+
         if (std.fmt.parseInt(usize, trimmed, 10)) |val| {
             if (val >= 1 and val <= repos.len) {
                 return val - 1;
             }
         } else |_| {}
-        try stdout.print("Invalid selection. Please try again.\n", .{});
+        try stdout.print("Invalid selection '{s}'. Please try again.\n", .{trimmed});
+        // Small sleep to prevent tight loop if stdin is weird
+        std.time.sleep(100 * std.time.ns_per_ms);
     }
 }
 
@@ -517,14 +534,31 @@ fn promptUserSelectAsset(assets: []ReleaseAsset) !usize {
     var buf: [64]u8 = undefined;
     while (true) {
         try stdout.print("Enter selection [1-{d}]: ", .{assets.len});
-        const line = (try stdin.readUntilDelimiterOrEof(&buf, '\n')) orelse return error.UserInterrupted;
-        const trimmed = std.mem.trim(u8, line, " \t\r");
+        const line = stdin.readUntilDelimiterOrEof(&buf, '\n') catch |err| {
+            if (err == error.StreamTooLong) {
+                while (true) {
+                    const c = stdin.readByte() catch break;
+                    if (c == '\n') break;
+                }
+                try stdout.print("Input too long. Please try again.\n", .{});
+                continue;
+            }
+            return err;
+        };
+        
+        if (line == null) return error.UserInterrupted;
+        
+        const trimmed = std.mem.trim(u8, line.?, " \t\r");
+        if (trimmed.len == 0) continue;
+
         if (std.fmt.parseInt(usize, trimmed, 10)) |val| {
             if (val >= 1 and val <= assets.len) {
                 return val - 1;
             }
         } else |_| {}
-        try stdout.print("Invalid selection. Please try again.\n", .{});
+        try stdout.print("Invalid selection '{s}'. Please try again.\n", .{trimmed});
+        // Small sleep to prevent tight loop if stdin is weird
+        std.time.sleep(100 * std.time.ns_per_ms);
     }
 }
 
