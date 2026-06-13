@@ -88,6 +88,20 @@ NU_BIN="$CURRENT_DIR/bin/nu"
 # Path to plugin registry config file
 PLUGIN_CONFIG="$XXH_HOME/plugin.msgpackz"
 
+# Configure Nushell to source user's config files from HOME
+NU_ARGS=("--plugin-config" "$PLUGIN_CONFIG")
+if [[ -f "$HOME/.config/nushell/config.nu" ]]; then
+  NU_ARGS+=("--config" "$HOME/.config/nushell/config.nu")
+elif [[ -f "$HOME/config.nu" ]]; then
+  NU_ARGS+=("--config" "$HOME/config.nu")
+fi
+
+if [[ -f "$HOME/.config/nushell/env.nu" ]]; then
+  NU_ARGS+=("--env-config" "$HOME/.config/nushell/env.nu")
+elif [[ -f "$HOME/env.nu" ]]; then
+  NU_ARGS+=("--env-config" "$HOME/env.nu")
+fi
+
 # Find and register all nu_plugin_* executables
 # 1. Look in shell's own bin directory (shipped plugins)
 if [[ -d "$CURRENT_DIR/bin" ]]; then
@@ -108,12 +122,12 @@ fi
 
 if [[ $EXECUTE_COMMAND_B64 != '' ]]; then
   cmd=$(decode_b64 "$EXECUTE_COMMAND_B64")
-  exec "$NU_BIN" --plugin-config "$PLUGIN_CONFIG" -c "$cmd"
+  exec "$NU_BIN" "${NU_ARGS[@]}" -c "$cmd"
 elif [[ $EXECUTE_COMMAND != '' ]]; then
-  exec "$NU_BIN" --plugin-config "$PLUGIN_CONFIG" -c "$EXECUTE_COMMAND"
+  exec "$NU_BIN" "${NU_ARGS[@]}" -c "$EXECUTE_COMMAND"
 elif [[ $EXECUTE_FILE != '' ]]; then
-  exec "$NU_BIN" --plugin-config "$PLUGIN_CONFIG" "$EXECUTE_FILE"
+  exec "$NU_BIN" "${NU_ARGS[@]}" "$EXECUTE_FILE"
 else
   # Launch interactive Nushell
-  exec "$NU_BIN" --plugin-config "$PLUGIN_CONFIG"
+  exec "$NU_BIN" "${NU_ARGS[@]}"
 fi

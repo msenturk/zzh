@@ -69,6 +69,14 @@ pub fn main() !void {
     std.debug.print("Waiting for SSH to become available...\n", .{});
     std.time.sleep(8 * std.time.ns_per_s);
 
+    // Install dependencies in container for plugin testing
+    std.debug.print("Installing dependencies in test container (python3, git, curl)...\n", .{});
+    const apk_args = [_][]const u8{
+        "docker", "exec", "zzh-e2e-test", "apk", "add", "--no-cache", "python3", "git", "curl"
+    };
+    var apk_child = std.process.Child.init(&apk_args, allocator);
+    _ = try apk_child.spawnAndWait();
+
     const zzh_exe = if (@import("builtin").os.tag == .windows) "zig-out/bin/zzh.exe" else "zig-out/bin/zzh";
 
     // Test 1: Basic Connection E2E
@@ -126,6 +134,91 @@ pub fn main() !void {
         std.process.exit(1);
     }
     std.debug.print("Test 3 (Static Binary Provisioning - ripgrep) Passed!\n", .{});
+
+    // Create a local dotfile for testing
+    const test_dotfile_content = "dotfile_content_test";
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+    try tmp_dir.dir.writeFile(.{ .sub_path = "e2e_dotfile", .data = test_dotfile_content });
+    var e2e_dotfile_buf: [1024]u8 = undefined;
+    const e2e_dotfile_path = try tmp_dir.dir.realpath("e2e_dotfile", &e2e_dotfile_buf);
+
+    // Test 4: Native Dotfiles (+d)
+    std.debug.print("Running Test 4 (Native Dotfiles)... \n", .{});
+    const args4 = [_][]const u8{
+        zzh_exe,
+        "testuser@127.0.0.1",
+        "-p", "2222",
+        "++password", "testpass",
+        "+s", "zsh",
+        "+d", e2e_dotfile_path,
+        "+hc", "cat e2e_dotfile"
+    };
+    const out4 = try runZzh(allocator, &args4);
+    defer allocator.free(out4);
+    if (std.mem.indexOf(u8, out4, test_dotfile_content) == null) {
+        std.debug.print("Test 4 Failed: {s}\n", .{out4});
+        std.process.exit(1);
+    }
+    std.debug.print("Test 4 (Native Dotfiles) Passed!\n", .{});
+
+    // Test 5: xxh-plugin-prerun-dotfiles
+    std.debug.print("Running Test 5 (xxh-plugin-prerun-dotfiles)...\n", .{});
+    const args5 = [_][]const u8{
+        zzh_exe,
+        "testuser@127.0.0.1",
+        "-p", "2222",
+        "++password", "testpass",
+        "+s", "zsh",
+        "+I", "xxh-plugin-prerun-dotfiles",
+        "+hc", "echo PLUGIN_DOTFILES_SUCCESS"
+    };
+    const out5 = try runZzh(allocator, &args5);
+    defer allocator.free(out5);
+    if (std.mem.indexOf(u8, out5, "PLUGIN_DOTFILES_SUCCESS") == null) {
+        std.debug.print("Test 5 Failed: {s}\n", .{out5});
+        std.process.exit(1);
+    }
+    std.debug.print("Test 5 (xxh-plugin-prerun-dotfiles) Passed!\n", .{});
+
+    // Test 6: Shell-Specific Plugin (zsh-autosuggestions)
+    std.debug.print("Running Test 6 (Shell-Specific Plugin - zsh-autosuggestions)...\n", .{});
+    const args6 = [_][]const u8{
+        zzh_exe,
+        "testuser@127.0.0.1",
+        "-p", "2222",
+        "++password", "testpass",
+        "+s", "zsh",
+        "+I", "xxh-plugin-zsh-autosuggestions",
+        "+hc", "echo ZSH_AUTO_SUCCESS"
+    };
+    const out6 = try runZzh(allocator, &args6);
+    defer allocator.free(out6);
+    if (std.mem.indexOf(u8, out6, "ZSH_AUTO_SUCCESS") == null) {
+        std.debug.print("Test 6 Failed: {s}\n", .{out6});
+        std.process.exit(1);
+    }
+    std.debug.print("Test 6 (Shell-Specific Plugin - zsh-autosuggestions) Passed!\n", .{});
+
+    // Test 7: Multiple Plugins
+    std.debug.print("Running Test 7 (Multiple Plugins)...\n", .{});
+    const args7 = [_][]const u8{
+        zzh_exe,
+        "testuser@127.0.0.1",
+        "-p", "2222",
+        "++password", "testpass",
+        "+s", "zsh",
+        "+I", "xxh-plugin-zsh-example",
+        "+I", "xxh-plugin-prerun-core",
+        "+hc", "echo MULTI_PLUGIN_SUCCESS"
+    };
+    const out7 = try runZzh(allocator, &args7);
+    defer allocator.free(out7);
+    if (std.mem.indexOf(u8, out7, "MULTI_PLUGIN_SUCCESS") == null) {
+        std.debug.print("Test 7 Failed: {s}\n", .{out7});
+        std.process.exit(1);
+    }
+    std.debug.print("Test 7 (Multiple Plugins) Passed!\n", .{});
 
     std.debug.print("All E2E Tests Passed successfully!\n", .{});
 }

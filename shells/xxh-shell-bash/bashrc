@@ -30,4 +30,9 @@ for pluginrc_file in $(find $CURRENT_DIR/../../../plugins/*/build -type f -name 
   fi
 done
 
+# Source user's standard bashrc if it exists in their HOME
+if [ -f "$HOME/.bashrc" ]; then
+  source "$HOME/.bashrc"
+fi
+
 cd $HOME

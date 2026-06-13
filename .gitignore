@@ -38,3 +38,9 @@ coverage/*
 docs/*
 xxh-original/*
 test-sshd/*
+zzh
+assets/wsl_demo.tape
+.gitignore
+assets/demo.tape
+assets/bashrc.wsl
+assets/bashrc

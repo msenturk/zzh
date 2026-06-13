@@ -17,6 +17,8 @@ A zero-dependency, hyper-fast rewrite of the [xxh](https://github.com/xxh/xxh) o
 
 `zzh` allows you to bring your favorite interactive shell (e.g., `zsh`, `fish`, `bash`, `nu`) along with all your custom configurations, themes, and plugins to any remote host you connect to via SSH. It does this without requiring administrative privileges, pre-installation on the remote host, or local Python dependencies.
 
+![zzh Demo](assets/demo.svg)
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -102,10 +104,29 @@ zig build e2e
 
 ## Configuration
 
-`zzh` looks for configuration files at `~/.config/zzh/config.zzhc`.
+`zzh` looks for configuration files at `~/.config/zzh/config.zzhc`. You can scaffold a default configuration file with:
+
+```bash
+zzh ++config-init
+```
+
+Here is an example `config.zzhc` structure:
 
 ```yaml
-# zzh Demo Configuration File (config.zzhc)
+# zzh Configuration File (config.zzhc)
+
+# Global settings
+settings:
+  local_zzh_home: "~/.zzh"                 # Path to local zzh packages and binary cache
+  host_zzh_home: "~/.zzh"                  # Target remote execution directory
+  config_path: "~/.config/zzh/config.zzhc" # Path to this configuration file
+
+# Custom download links for static binaries.
+# Bypasses the GitHub API lookup when downloading binaries using the '+b' flag.
+bin_urls:
+  - BurntSushi/ripgrep
+  - sharkdp/fd
+
 hosts:
   # Matches any host you connect to
   ".*":
@@ -167,20 +188,24 @@ zzh +L
 Bundles local configuration files or directories in the payload and symlinks them to the remote user's home directory.
 
 ```bash
-# Sync a dotfile — available as ~/.vimrc on remote
-zzh user@host +s zsh +d ~/.vimrc
+# Sync local bashrc to remote as .bashrc
+zzh user@host +d ~/.bashrc:.bashrc
 
 # Sync multiple files
-zzh user@host +s zsh +d ~/.vimrc +d ~/.gitconfig +d ~/.tmux.conf
+zzh user@host +d ~/.bashrc:.bashrc +d ~/.bash_aliases:.bash_aliases
 
 # Sync an entire config directory — available as ~/.config/nvim on remote
 zzh user@host +s zsh +d ~/.config/nvim
-
-# Sync a tool config — available as ~/.ripgreprc on remote
-zzh user@host +s zsh +d ~/.ripgreprc
 ```
 
+`zzh` supports a `local:remote` mapping syntax:
+- `+d ~/.bashrc` -> symlinks to `~/bashrc` on remote (basename)
+- `+d ~/.bashrc:.bashrc` -> symlinks to `~/.bashrc` on remote (explicit name)
+
+**Automatic Sourcing**: The built-in `bash` and `zsh` shells in `zzh` are pre-configured to automatically source `~/.bashrc` and `~/.zshrc` respectively, if they exist in the remote home directory. This ensures your custom prompts (`PS1`), aliases, and functions are active immediately.
+
 `zzh` handles dotfiles with robust safety and synchronization features:
+
 
 * **Obsolete Cleanup**: If you sync dotfiles in one connection and remove them from the command in the next, `zzh` automatically detects this, cleans up the obsolete symlink, and restores any original backup file.
 * **Side-by-Side Diffs**: If a remote file/directory differs from the incoming local one, `zzh` prints a side-by-side (two-panel) diff (or falls back to a unified diff on BusyBox/minimal hosts) so you can review changes.
@@ -224,7 +249,7 @@ zzh +I tmux
 
 ### Static Binary Provisioning — `+b`
 
-Install any static binary from GitHub releases directly on the remote host — no root required, no package manager, fully portable.
+Install any static binary (from GitHub releases, custom URLs, or local files) directly on the remote host — no root required, no package manager, fully portable.
 
 ```bash
 # Install ripgrep on remote (auto-detects remote arch)
@@ -240,10 +265,46 @@ zzh user@host +s zsh +b zyedidia/micro@v2.0.14
 zzh user@host +s zsh +b https://github.com/zyedidia/micro
 ```
 
+#### Custom & Archive URLs
+You can download binaries directly from custom servers or specific release assets. `zzh` supports extracting binaries from `.tar.gz`, `.tgz`, and `.zip` archive formats:
+
+* **Direct URL on Command Line**:
+  ```bash
+  zzh user@host +b https://example.com/bin/fd.tar.gz
+  ```
+  *(Note: Passing direct URLs on the command line will cache the executable on the remote using the URL's filename, e.g. `fd.tar.gz`.)*
+
+* **Via Configuration File (Recommended)**:
+  To keep your remote commands clean, map a binary's name to its URL under `bin_urls` in `~/.config/zzh/config.zzhc`:
+  ```yaml
+  bin_urls:
+    fd: "https://example.com/bin/fd.tar.gz"
+  ```
+  Then connect specifying only the clean name:
+  ```bash
+  zzh user@host +b fd
+  ```
+  `zzh` will download the archive, extract the `fd` executable, and place it directly in `~/.zzh/bin/fd`.
+
+> [!WARNING]
+> `.rar` archives are NOT supported. `zzh` uses standard system `tar` commands for extraction. Since `tar` does not natively support the proprietary RAR format, you should package your files as `.tar.gz` or `.zip` archives.
+
+#### Deploying Local/Custom Binaries
+If you have a binary already compiled on your local machine that you want to send to the remote:
+1. Copy or symlink the local binary into your local `zzh` bin cache directory (defaults to `~/.zzh/bin/`):
+   ```bash
+   cp /home/user/fd ~/.zzh/bin/fd
+   ```
+2. Run `zzh` specifying the binary name:
+   ```bash
+   zzh user@host +b fd
+   ```
+`zzh` will detect that `fd` is already present locally, skip downloading, bundle it, and upload it to `~/.zzh/bin/fd` on the remote host.
+
 **How it works:**
 - zzh probes the remote's architecture and OS (`uname -m`, musl vs glibc) via a quick SSH check
-- Queries the GitHub Releases API to find the correct pre-built asset
-- Downloads and caches the binary locally at `~/.zzh/bins/<name>`
+- Queries the GitHub Releases API (or your configured URL) to find the correct pre-built asset
+- Downloads and caches the binary locally at `~/.zzh/bin/<name>`
 - Bundles it in the payload at tarball root `bin/<name>` → permanent at `~/.zzh/bin/<name>` on remote
 - `~/.zzh/bin/` is automatically added to `$PATH` in your remote shell
 - Survives `+if` reinstalls (just like `++tmux`)
@@ -251,7 +312,7 @@ zzh user@host +s zsh +b https://github.com/zyedidia/micro
 **Key difference from `+I`:**
 | | `+I xxh-plugin-*` | `+b repo/tool` |
 |---|---|---|
-| Source | xxh ecosystem git repos | Any GitHub/GitLab release |
+| Source | xxh ecosystem git repos | Any GitHub/GitLab release / Custom URL / Local file |
 | Format | xxh plugin structure | Plain static binary |
 | Location | `~/.zzh/.zzh/plugins/` | `~/.zzh/bin/` |
 | Persistence | Wiped on `+if` | Survives `+if` |
@@ -334,6 +395,7 @@ use completions/zzh.nu
 | `++update` | Update all cached packages via `git pull` |
 | `++tmux` | Attach to persistent tmux session (auto-downloads tmux) |
 | `++tmux-session <name>` | Tmux session name (default: `zzh`) |
+| `++config-init` | Scaffold a default configuration file under `~/.config/zzh/` |
 | `+hh <path>` | Remote path to deploy payload to (default: `~/.zzh`) |
 | `+hhr` | Ephemeral mode: automatically remove payload from remote after disconnect (guaranteed client-side cleanup) |
 | `+if` / `+iff` | Force reinstall payload / full home |

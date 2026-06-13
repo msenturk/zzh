@@ -1,24 +1,57 @@
-# zzh Demo Configuration File (config.zzhc)
+# zzh Configuration File (config.zzhc)
 #
-# This file is used to configure default options for SSH connections and shells.
-# It matches hosts using regex patterns and merges arguments sequentially.
+# This file configures default shells, plugins, dotfiles, and binary utilities per-host.
+# Host names are matched using wildcard/glob patterns and merged sequentially.
+
+# Global application settings
+settings:
+  # Path to local zzh packages and binary cache (default: ~/.zzh)
+  local_zzh_home: "~/.zzh"
+  # Target remote execution directory (default: ~/.zzh)
+  host_zzh_home: "~/.zzh"
+  # Path to configuration file (default: ~/.config/zzh/config.zzhc)
+  config_path: "~/.config/zzh/config.zzhc"
+
+# Custom download links for static binaries. 
+# Bypasses the GitHub API lookup when downloading binaries using the '+b' command-line flag or hosts configuration.
+bin_urls:
+  - BurntSushi/ripgrep
+  - sharkdp/fd
+  - sharkdp/bat
 
 hosts:
-  # Matches any host you connect to
+  # Default settings applied to every connection.
   ".*":
-    +s: zsh               # Use zsh as the default portable shell
-    +hhh: "~"             # Set target home directory to "~"
+    +s: bash                        # Default shell to install and enter
+    +d:
+      - ~/.bashrc:.bashrc
+      - ~/.bash_aliases:.bash_aliases
+    +b:
+      - BurntSushi/ripgrep
+      - sharkdp/bat
+      - jdx/mise
+      - direnv/direnv
+      - ajeetdsouza/zoxide
+    ++tmux: true
+    +hhh: "~"                       # Remote base directory for payload execution
 
-  # Matches connections to localhost (e.g. root@127.0.0.1 or 127.0.0.1)
+  # Local testing configurations.
   "127.0.0.1":
-    -p: 2222              # Use port 2222 for local test container
-    +if:                  # Force reinstall xxh packages (install-force flag)
-    +e:                   # Inject environment variables
-      - OSH_THEME="powerlevel10k"
-      - E2E_TEST="active"
+    -p: 2222                        # Port for local test container
+    -i: ~/.ssh/xhh_test_key
+    # +if:                            # Force reinstall packages on each connection
+    +e:                             # Inject custom environment variables
+      - LANG="C.UTF-8"
+      - LC_ALL="C.UTF-8"
 
-  # Matches target hosts matching 'prod-server*'
-  "prod-server-.*":
+  # Production servers matching 'prod-server-*'.
+  "prod-server-*":
     -o: StrictHostKeyChecking=no
     -o: UserKnownHostsFile=/dev/null
-    +I: xxh-plugin-zsh-ohmyzsh    # Pre-install Oh My Zsh plugin
+    ++tmux-session: prod-admin      # Set dedicated tmux session name
+    +b:                             # Provision custom static utilities
+      - BurntSushi/ripgrep
+      - sharkdp/fd
+    +d:                             # Synchronize user preferences and configurations
+      - "~/.zshrc"
+      - "~/.gitconfig"

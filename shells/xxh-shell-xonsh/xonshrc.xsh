@@ -53,7 +53,7 @@ for e in @.env:
             print(f'Execute {repr(code)}')
         exec(code)
 
-for xsh in sorted(($XXH_HOME / '.xxh/plugins').glob('**/build/*pluginrc.xsh')) + [$XXH_HOME / '.xonshrc']:
+for xsh in sorted(($XXH_HOME / '.xxh/plugins').glob('**/build/*pluginrc.xsh')) + [$XXH_HOME / '.xonshrc', pf('~/.xonshrc').expanduser()]:
     if xsh.exists():
         source @(xsh)
 

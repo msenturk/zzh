@@ -5,112 +5,116 @@ const package = @import("package.zig");
 const bundler = @import("bundler.zig");
 const deploy = @import("deploy.zig");
 
-fn listBinaries(allocator: std.mem.Allocator, local_zzh_home: ?[]const u8) !void {
-    const stdout = std.io.getStdOut().writer();
-    var base_dir: []const u8 = undefined;
-    if (local_zzh_home) |lh| {
-        base_dir = try config.resolvePath(allocator, lh);
+/// Lists all custom static binaries installed locally.
+fn listBinaries(allocator: std.mem.Allocator, custom_zzh_home: ?[]const u8) !void {
+    const standard_output = std.io.getStdOut().writer();
+    var resolved_zzh_root: []const u8 = undefined;
+    if (custom_zzh_home) |lh| {
+        resolved_zzh_root = try config.expandUserPath(allocator, lh);
     } else {
-        const home = config.getHomeDir(allocator) orelse return error.HomeDirNotFound;
-        defer allocator.free(home);
-        base_dir = try std.fs.path.join(allocator, &.{ home, ".zzh" });
+        const home_dir = config.discoverUserHomeDirectory(allocator) orelse return error.HomeDirNotFound;
+        defer allocator.free(home_dir);
+        resolved_zzh_root = try std.fs.path.join(allocator, &.{ home_dir, ".zzh" });
     }
-    defer allocator.free(base_dir);
+    defer allocator.free(resolved_zzh_root);
 
-    const path = try std.fs.path.join(allocator, &.{ base_dir, "bin" });
-    defer allocator.free(path);
+    const binary_directory_path = try std.fs.path.join(allocator, &.{ resolved_zzh_root, "bin" });
+    defer allocator.free(binary_directory_path);
 
-    var dir = std.fs.openDirAbsolute(path, .{ .iterate = true }) catch |err| {
+    var binary_directory = std.fs.openDirAbsolute(binary_directory_path, .{ .iterate = true }) catch |err| {
         if (err == error.FileNotFound) return;
         return err;
     };
-    defer dir.close();
+    defer binary_directory.close();
 
-    var it = dir.iterate();
-    while (try it.next()) |entry| {
-        if (entry.kind != .directory) {
-            try stdout.print("{s}\n", .{entry.name});
+    var directory_iterator = binary_directory.iterate();
+    while (try directory_iterator.next()) |file_entry| {
+        if (file_entry.kind != .directory) {
+            try standard_output.print("{s}\n", .{file_entry.name});
         }
     }
 }
 
-fn listPackages(allocator: std.mem.Allocator, local_zzh_home: ?[]const u8, filter_packages: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
-    var base_dir: []const u8 = undefined;
-    if (local_zzh_home) |lh| {
-        base_dir = try config.resolvePath(allocator, lh);
+/// Lists all shells or plugins matching a filter set.
+fn listPackages(allocator: std.mem.Allocator, custom_zzh_home: ?[]const u8, package_filter_list: []const []const u8) !void {
+    const standard_output = std.io.getStdOut().writer();
+    var resolved_zzh_root: []const u8 = undefined;
+    if (custom_zzh_home) |lh| {
+        resolved_zzh_root = try config.expandUserPath(allocator, lh);
     } else {
-        const home = config.getHomeDir(allocator) orelse return error.HomeDirNotFound;
-        defer allocator.free(home);
-        base_dir = try std.fs.path.join(allocator, &.{ home, ".zzh" });
+        const home_dir = config.discoverUserHomeDirectory(allocator) orelse return error.HomeDirNotFound;
+        defer allocator.free(home_dir);
+        resolved_zzh_root = try std.fs.path.join(allocator, &.{ home_dir, ".zzh" });
     }
-    defer allocator.free(base_dir);
+    defer allocator.free(resolved_zzh_root);
 
-    const sub_dirs = [_][]const u8{ "shells", "plugins" };
-    for (sub_dirs) |sub| {
-        const path = try std.fs.path.join(allocator, &.{ base_dir, ".zzh", sub });
-        defer allocator.free(path);
+    const category_folders = [_][]const u8{ "shells", "plugins" };
+    for (category_folders) |sub| {
+        const target_category_path = try std.fs.path.join(allocator, &.{ resolved_zzh_root, ".zzh", sub });
+        defer allocator.free(target_category_path);
 
-        var dir = std.fs.openDirAbsolute(path, .{ .iterate = true }) catch |err| {
+        var category_directory = std.fs.openDirAbsolute(target_category_path, .{ .iterate = true }) catch |err| {
             if (err == error.FileNotFound) continue;
             return err;
         };
-        defer dir.close();
+        defer category_directory.close();
 
-        var it = dir.iterate();
-        while (try it.next()) |entry| {
-            if (entry.kind == .directory and std.mem.startsWith(u8, entry.name, "xxh-")) {
-                if (filter_packages.len > 0) {
-                    var found = false;
-                    for (filter_packages) |fp| {
-                        if (std.mem.eql(u8, entry.name, fp)) {
-                            found = true;
+        var directory_iterator = category_directory.iterate();
+        while (try directory_iterator.next()) |folder_entry| {
+            if (folder_entry.kind == .directory and std.mem.startsWith(u8, folder_entry.name, "xxh-")) {
+                if (package_filter_list.len > 0) {
+                    var matches_filter = false;
+                    for (package_filter_list) |filter_item| {
+                        if (std.mem.eql(u8, folder_entry.name, filter_item)) {
+                            matches_filter = true;
                             break;
                         }
                     }
-                    if (found) {
-                        try stdout.print("{s}\n", .{entry.name});
+                    if (matches_filter) {
+                        try standard_output.print("{s}\n", .{folder_entry.name});
                     }
                 } else {
-                    try stdout.print("{s}\n", .{entry.name});
+                    try standard_output.print("{s}\n", .{folder_entry.name});
                 }
             }
         }
     }
 }
 
-fn listShellsOrPlugins(allocator: std.mem.Allocator, local_zzh_home: ?[]const u8, sub: []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
-    var base_dir: []const u8 = undefined;
-    if (local_zzh_home) |lh| {
-        base_dir = try config.resolvePath(allocator, lh);
+/// Helper function to list all subfolders for a specific categories (shells or plugins).
+fn listShellsOrPlugins(allocator: std.mem.Allocator, custom_zzh_home: ?[]const u8, category_name: []const u8) !void {
+    const standard_output = std.io.getStdOut().writer();
+    var resolved_zzh_root: []const u8 = undefined;
+    if (custom_zzh_home) |lh| {
+        resolved_zzh_root = try config.expandUserPath(allocator, lh);
     } else {
-        const home = config.getHomeDir(allocator) orelse return error.HomeDirNotFound;
-        defer allocator.free(home);
-        base_dir = try std.fs.path.join(allocator, &.{ home, ".zzh" });
+        const home_dir = config.discoverUserHomeDirectory(allocator) orelse return error.HomeDirNotFound;
+        defer allocator.free(home_dir);
+        resolved_zzh_root = try std.fs.path.join(allocator, &.{ home_dir, ".zzh" });
     }
-    defer allocator.free(base_dir);
+    defer allocator.free(resolved_zzh_root);
 
-    const path = try std.fs.path.join(allocator, &.{ base_dir, ".zzh", sub });
-    defer allocator.free(path);
+    const category_directory_path = try std.fs.path.join(allocator, &.{ resolved_zzh_root, ".zzh", category_name });
+    defer allocator.free(category_directory_path);
 
-    var dir = std.fs.openDirAbsolute(path, .{ .iterate = true }) catch |err| {
+    var category_directory = std.fs.openDirAbsolute(category_directory_path, .{ .iterate = true }) catch |err| {
         if (err == error.FileNotFound) return;
         return err;
     };
-    defer dir.close();
+    defer category_directory.close();
 
-    var it = dir.iterate();
-    while (try it.next()) |entry| {
-        if (entry.kind == .directory and std.mem.startsWith(u8, entry.name, "xxh-")) {
-            try stdout.print("{s}\n", .{entry.name});
+    var directory_iterator = category_directory.iterate();
+    while (try directory_iterator.next()) |folder_entry| {
+        if (folder_entry.kind == .directory and std.mem.startsWith(u8, folder_entry.name, "xxh-")) {
+            try standard_output.print("{s}\n", .{folder_entry.name});
         }
     }
 }
 
+/// Renders the zzh usage instructions.
 fn printHelp() void {
-    const stdout = std.io.getStdOut().writer();
-    stdout.print(
+    const standard_output = std.io.getStdOut().writer();
+    standard_output.print(
         \\Usage: zzh [ssh arguments] [user@]host[:port] [zzh arguments]
         \\
         \\Bring your favorite shell wherever you go through the ssh.
@@ -134,6 +138,7 @@ fn printHelp() void {
         \\  +i, ++install            Force install packages without connecting
         \\  +if, ++install-force     Force re-download packages
         \\  +xc, ++zzh-config <path> Path to config.zzhc file
+        \\  ++config-init            Scaffold a default config.zzhc file in ~/.config/zzh/
         \\  +e, ++env <NAME=VAL>     Set environment variable on host
         \\  +eb, ++envb <NAME=B64>   Set base64 encoded environment variable
         \\  +P, ++password <pass>    SSH password (use ++password-prompt for secure prompt)
@@ -161,53 +166,63 @@ fn printHelp() void {
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var local_heap = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = local_heap.deinit();
+    const allocator = local_heap.allocator();
 
-    var args_it_initial = try std.process.argsWithAllocator(allocator);
-    _ = args_it_initial.next(); // skip exe name
-    if (args_it_initial.next()) |first_arg| {
-        if (std.mem.eql(u8, first_arg, "--internal-setsid")) {
-            const builtin = @import("builtin");
-            if (builtin.os.tag == .linux) {
-                _ = std.os.linux.syscall0(.setsid);
-            } else if (builtin.os.tag != .windows) {
-                const posix_setsid = struct {
-                    extern "c" fn setsid() i32;
-                }.setsid;
-                _ = posix_setsid();
-            }
+    var args_list = std.ArrayList([]const u8).init(allocator);
+    defer {
+        for (args_list.items) |arg| allocator.free(arg);
+        args_list.deinit();
+    }
 
-            var exec_argv = std.ArrayList([]const u8).init(allocator);
-            defer exec_argv.deinit();
-
-            while (args_it_initial.next()) |arg| {
-                try exec_argv.append(try allocator.dupe(u8, arg));
-            }
-
-            if (exec_argv.items.len > 0) {
-                if (builtin.os.tag != .windows) {
-                    return std.process.execv(allocator, exec_argv.items);
-                } else {
-                    unreachable;
-                }
-            } else {
-                std.process.exit(1);
-            }
+    {
+        var unfiltered_arguments = try std.process.argsWithAllocator(allocator);
+        defer unfiltered_arguments.deinit();
+        _ = unfiltered_arguments.next(); // Skip executable path token.
+        while (unfiltered_arguments.next()) |arg| {
+            try args_list.append(try allocator.dupe(u8, arg));
         }
     }
-    args_it_initial.deinit();
+    
+    // We intercept `--internal-setsid` calls to cleanly spawn child terminals 
+    // within their own session process group (preventing HUP signal propagation on Linux targets).
+    if (args_list.items.len > 0 and std.mem.eql(u8, args_list.items[0], "--internal-setsid")) {
+        const builtin = @import("builtin");
+        if (builtin.os.tag == .linux) {
+            _ = std.os.linux.syscall0(.setsid);
+        } else if (builtin.os.tag != .windows) {
+            const posix_setsid = struct {
+                extern "c" fn setsid() i32;
+            }.setsid;
+            _ = posix_setsid();
+        }
 
-    // Check if we are being invoked as an internal SSH_ASKPASS provider
-    if (std.process.getEnvVarOwned(allocator, "ZZH_INTERNAL_ASKPASS")) |askpass| {
-        defer allocator.free(askpass);
-        if (std.mem.eql(u8, askpass, "1")) {
-            if (std.process.getEnvVarOwned(allocator, "ZZH_INTERNAL_PASSWORD")) |pwd| {
-                defer allocator.free(pwd);
-                const stdout = std.io.getStdOut().writer();
-                stdout.writeAll(pwd) catch {};
-                stdout.writeAll("\n") catch {};
+        var setsid_exec_arguments = std.ArrayList([]const u8).init(allocator);
+        defer setsid_exec_arguments.deinit();
+
+        if (args_list.items.len > 1) {
+            try setsid_exec_arguments.appendSlice(args_list.items[1..]);
+            if (builtin.os.tag != .windows) {
+                return std.process.execv(allocator, setsid_exec_arguments.items);
+            } else {
+                unreachable;
+            }
+        } else {
+            std.process.exit(1);
+        }
+    }
+
+    // Check if we are being invoked as an internal SSH_ASKPASS provider.
+    // SSH uses this protocol to dynamically prompt for passwords when running without a control terminal.
+    if (std.process.getEnvVarOwned(allocator, "ZZH_INTERNAL_ASKPASS")) |askpass_env| {
+        defer allocator.free(askpass_env);
+        if (std.mem.eql(u8, askpass_env, "1")) {
+            if (std.process.getEnvVarOwned(allocator, "ZZH_INTERNAL_PASSWORD")) |stored_password| {
+                defer allocator.free(stored_password);
+                const standard_output = std.io.getStdOut().writer();
+                standard_output.writeAll(stored_password) catch {};
+                standard_output.writeAll("\n") catch {};
                 std.process.exit(0);
             } else |_| {
                 std.process.exit(1);
@@ -215,150 +230,151 @@ pub fn main() !void {
         }
     } else |_| {}
 
-    // 1. Parse CLI arguments first to locate the target host and config path
-    var cli_args_only = try cli.parseArgs(allocator);
-    defer cli_args_only.deinit();
+    // Parse command line options to detect config paths and operational parameters.
+    var preliminary_arguments = cli.OperationalConfig.init(allocator);
+    defer preliminary_arguments.deinit();
+    try cli.populateConfigFromTokens(allocator, args_list.items, &preliminary_arguments);
 
-    if (cli_args_only.help) {
+    if (preliminary_arguments.help) {
         printHelp();
         return;
     }
 
-    // Check if we are performing a local packages operation
-    const has_local_ops_only = cli_args_only.destination == null and (
-        cli_args_only.has_list_zzh_packages or
-        cli_args_only.list_shells or
-        cli_args_only.list_plugins or
-        cli_args_only.list_binaries or
-        cli_args_only.install_zzh_packages.items.len > 0 or
-        cli_args_only.reinstall_zzh_packages.items.len > 0 or
-        cli_args_only.remove_zzh_packages.items.len > 0 or
-        cli_args_only.update_packages
+    if (preliminary_arguments.config_init) {
+        try config.initializeDefaultConfigurationFile(allocator, null);
+        return;
+    }
+
+    const is_offline_package_management = preliminary_arguments.destination == null and (
+        preliminary_arguments.has_list_zzh_packages or
+        preliminary_arguments.list_shells or
+        preliminary_arguments.list_plugins or
+        preliminary_arguments.list_binaries or
+        preliminary_arguments.install_zzh_packages.items.len > 0 or
+        preliminary_arguments.reinstall_zzh_packages.items.len > 0 or
+        preliminary_arguments.remove_zzh_packages.items.len > 0 or
+        preliminary_arguments.update_packages
     );
 
-    if (cli_args_only.destination == null and !has_local_ops_only) {
+    if (preliminary_arguments.destination == null and !is_offline_package_management) {
         printHelp();
         std.process.exit(1);
     }
 
-    // 2. Resolve and parse config.zzhc path if destination is present
-    var config_args_list = std.ArrayList([]const u8).init(allocator);
+    var resolved_configuration_options = std.ArrayList([]const u8).init(allocator);
     defer {
-        for (config_args_list.items) |item| allocator.free(item);
-        config_args_list.deinit();
+        for (resolved_configuration_options.items) |item| allocator.free(item);
+        resolved_configuration_options.deinit();
     }
 
-    if (cli_args_only.destination) |dest| {
-        const dest_info = cli.parseDestination(dest);
-        const config_path_raw = cli_args_only.config_path orelse "~/.config/zzh/config.zzhc";
-        const config_path = try config.resolvePath(allocator, config_path_raw);
+    if (preliminary_arguments.destination) |destination_uri| {
+        const destination_endpoint = cli.parseConnectionEndpoint(destination_uri);
+        const config_path_raw = preliminary_arguments.config_path orelse "~/.config/zzh/config.zzhc";
+        const config_path = try config.expandUserPath(allocator, config_path_raw);
         defer allocator.free(config_path);
 
-        config.parseConfig(allocator, config_path, dest_info.host, &config_args_list) catch |err| {
+        config.readAndParseConfigurationFile(allocator, config_path, destination_endpoint.host, &resolved_configuration_options) catch |err| {
             std.debug.print("Warning: Failed to parse config file: {}\n", .{err});
         };
     }
 
-    // 3. Merge arguments: Config file arguments first, then CLI arguments
-    var merged_args = cli.ZzhArgs.init(allocator);
-    defer merged_args.deinit();
+    // Merge arguments: Config file arguments first, then command-line arguments to allow overriding.
+    var operational_settings = cli.OperationalConfig.init(allocator);
+    defer operational_settings.deinit();
 
-    try cli.parseFromSlice(allocator, config_args_list.items, &merged_args);
+    try cli.populateConfigFromTokens(allocator, resolved_configuration_options.items, &operational_settings);
 
-    // Re-read process arguments to get fresh CLI args list
-    var args_it = try std.process.argsWithAllocator(allocator);
-    defer args_it.deinit();
-    _ = args_it.next(); // Skip program name
-    var cli_args_list = std.ArrayList([]const u8).init(allocator);
-    defer {
-        for (cli_args_list.items) |item| allocator.free(item);
-        cli_args_list.deinit();
-    }
-    while (args_it.next()) |arg| {
-        try cli_args_list.append(try allocator.dupe(u8, arg));
-    }
-    try cli.parseFromSlice(allocator, cli_args_list.items, &merged_args);
+    try cli.populateConfigFromTokens(allocator, args_list.items, &operational_settings);
 
-    // 4. Perform package operations if requested
-    var package_op_performed = false;
-    if (merged_args.install_zzh_packages.items.len > 0) {
-        for (merged_args.install_zzh_packages.items) |pkg_name| {
-            // tmux is a special standalone binary, not a git repo
+    // Perform any package management requests.
+    var completed_offline_action = false;
+    if (operational_settings.install_zzh_packages.items.len > 0) {
+        for (operational_settings.install_zzh_packages.items) |pkg_name| {
             if (std.mem.eql(u8, pkg_name, "tmux") or std.mem.eql(u8, pkg_name, "bin-tmux")) {
-                const tmux_path = try package.downloadTmux(allocator, merged_args.install_force, merged_args.local_zzh_home);
+                const local_arch = switch (@import("builtin").cpu.arch) {
+                    .x86_64 => "x86_64",
+                    .aarch64 => "aarch64",
+                    else => "x86_64",
+                };
+                const tmux_path = try package.provisionStaticallyCompiledTmux(
+                    allocator,
+                    operational_settings.install_force,
+                    operational_settings.local_zzh_home,
+                    local_arch,
+                );
                 allocator.free(tmux_path);
-                package_op_performed = true;
+                completed_offline_action = true;
                 continue;
             }
             const is_shell = std.mem.indexOf(u8, pkg_name, "-shell-") != null;
-            const resolved = try package.resolvePackage(allocator, pkg_name, is_shell);
-            defer package.freeResolvedPackage(allocator, resolved);
-            const path = try package.downloadAndCachePackage(allocator, resolved, is_shell, merged_args.install_force, merged_args.local_zzh_home);
+            const package_vitals = try package.fetchPackageVitals(allocator, pkg_name, is_shell);
+            defer package.releasePackageVitals(allocator, package_vitals);
+            const path = try package.obtainAndCachePackage(allocator, package_vitals, is_shell, operational_settings.install_force, operational_settings.local_zzh_home);
             allocator.free(path);
         }
-        package_op_performed = true;
+        completed_offline_action = true;
     }
 
-    if (merged_args.update_packages) {
-        try package.updatePackages(allocator, merged_args.local_zzh_home);
-        package_op_performed = true;
+    if (operational_settings.update_packages) {
+        try package.refreshCachedRepositories(allocator, operational_settings.local_zzh_home);
+        completed_offline_action = true;
     }
 
-    if (merged_args.reinstall_zzh_packages.items.len > 0) {
-        for (merged_args.reinstall_zzh_packages.items) |pkg_name| {
+    if (operational_settings.reinstall_zzh_packages.items.len > 0) {
+        for (operational_settings.reinstall_zzh_packages.items) |pkg_name| {
             const is_shell = std.mem.indexOf(u8, pkg_name, "-shell-") != null;
-            const resolved = try package.resolvePackage(allocator, pkg_name, is_shell);
-            defer package.freeResolvedPackage(allocator, resolved);
-            const path = try package.downloadAndCachePackage(allocator, resolved, is_shell, true, merged_args.local_zzh_home);
+            const package_vitals = try package.fetchPackageVitals(allocator, pkg_name, is_shell);
+            defer package.releasePackageVitals(allocator, package_vitals);
+            const path = try package.obtainAndCachePackage(allocator, package_vitals, is_shell, true, operational_settings.local_zzh_home);
             allocator.free(path);
         }
-        package_op_performed = true;
+        completed_offline_action = true;
     }
 
-    if (merged_args.remove_zzh_packages.items.len > 0) {
-        var base_dir: []const u8 = undefined;
-        if (merged_args.local_zzh_home) |lh| {
-            base_dir = try config.resolvePath(allocator, lh);
+    if (operational_settings.remove_zzh_packages.items.len > 0) {
+        var resolved_zzh_root: []const u8 = undefined;
+        if (operational_settings.local_zzh_home) |lh| {
+            resolved_zzh_root = try config.expandUserPath(allocator, lh);
         } else {
-            const home = config.getHomeDir(allocator) orelse return error.HomeDirNotFound;
-            defer allocator.free(home);
-            base_dir = try std.fs.path.join(allocator, &.{ home, ".zzh" });
+            const home_dir = config.discoverUserHomeDirectory(allocator) orelse return error.HomeDirNotFound;
+            defer allocator.free(home_dir);
+            resolved_zzh_root = try std.fs.path.join(allocator, &.{ home_dir, ".zzh" });
         }
-        defer allocator.free(base_dir);
+        defer allocator.free(resolved_zzh_root);
 
-        for (merged_args.remove_zzh_packages.items) |pkg_name| {
+        for (operational_settings.remove_zzh_packages.items) |pkg_name| {
             var deleted = false;
             
             const is_shell = std.mem.indexOf(u8, pkg_name, "-shell-") != null;
-            const sub_dir = if (is_shell) "shells" else "plugins";
-            const resolved = try package.resolvePackage(allocator, pkg_name, is_shell);
-            defer package.freeResolvedPackage(allocator, resolved);
+            const category_dir = if (is_shell) "shells" else "plugins";
+            const package_vitals = try package.fetchPackageVitals(allocator, pkg_name, is_shell);
+            defer package.releasePackageVitals(allocator, package_vitals);
 
-            const target_dir = try std.fs.path.join(allocator, &.{ base_dir, ".zzh", sub_dir, resolved.clean_name });
-            defer allocator.free(target_dir);
+            const package_install_path = try std.fs.path.join(allocator, &.{ resolved_zzh_root, ".zzh", category_dir, package_vitals.clean_name });
+            defer allocator.free(package_install_path);
 
-            var dir_exists = false;
-            if (std.fs.openDirAbsolute(target_dir, .{})) |d| {
-                dir_exists = true;
+            var package_directory_exists = false;
+            if (std.fs.openDirAbsolute(package_install_path, .{})) |d| {
+                package_directory_exists = true;
                 var mutable_d = d;
                 mutable_d.close();
             } else |_| {}
 
-            if (dir_exists) {
-                std.fs.deleteTreeAbsolute(target_dir) catch {};
-                std.debug.print("Removed package {s}\n", .{resolved.clean_name});
+            if (package_directory_exists) {
+                std.fs.deleteTreeAbsolute(package_install_path) catch {};
+                std.debug.print("Removed package {s}\n", .{package_vitals.clean_name});
                 deleted = true;
             }
 
-            const bin_path = try std.fs.path.join(allocator, &.{ base_dir, "bin", pkg_name });
-            defer allocator.free(bin_path);
-            var bin_exists = false;
-            if (std.fs.accessAbsolute(bin_path, .{})) |_| {
-                bin_exists = true;
+            const binary_install_path = try std.fs.path.join(allocator, &.{ resolved_zzh_root, "bin", pkg_name });
+            defer allocator.free(binary_install_path);
+            var binary_file_exists = false;
+            if (std.fs.accessAbsolute(binary_install_path, .{})) |_| {
+                binary_file_exists = true;
             } else |_| {}
 
-            if (bin_exists) {
-                std.fs.deleteFileAbsolute(bin_path) catch {};
+            if (binary_file_exists) {
+                std.fs.deleteFileAbsolute(binary_install_path) catch {};
                 std.debug.print("Removed binary {s}\n", .{pkg_name});
                 deleted = true;
             }
@@ -367,31 +383,31 @@ pub fn main() !void {
                 std.debug.print("Package/binary '{s}' not found\n", .{pkg_name});
             }
         }
-        package_op_performed = true;
+        completed_offline_action = true;
     }
 
-    if (merged_args.has_list_zzh_packages) {
-        try listPackages(allocator, merged_args.local_zzh_home, merged_args.list_zzh_packages.items);
+    if (operational_settings.has_list_zzh_packages) {
+        try listPackages(allocator, operational_settings.local_zzh_home, operational_settings.list_zzh_packages.items);
         return;
     }
 
-    if (merged_args.list_shells) {
-        try listShellsOrPlugins(allocator, merged_args.local_zzh_home, "shells");
+    if (operational_settings.list_shells) {
+        try listShellsOrPlugins(allocator, operational_settings.local_zzh_home, "shells");
         return;
     }
 
-    if (merged_args.list_plugins) {
-        try listShellsOrPlugins(allocator, merged_args.local_zzh_home, "plugins");
+    if (operational_settings.list_plugins) {
+        try listShellsOrPlugins(allocator, operational_settings.local_zzh_home, "plugins");
         return;
     }
 
-    if (merged_args.list_binaries) {
-        try listBinaries(allocator, merged_args.local_zzh_home);
+    if (operational_settings.list_binaries) {
+        try listBinaries(allocator, operational_settings.local_zzh_home);
         return;
     }
 
-    if (merged_args.destination == null) {
-        if (package_op_performed) {
+    if (operational_settings.destination == null) {
+        if (completed_offline_action) {
             return;
         } else {
             std.debug.print("Usage: zzh [ssh arguments] [user@]host[:port] [zzh arguments]\n", .{});
@@ -399,85 +415,109 @@ pub fn main() !void {
         }
     }
 
-    // 5. Override ssh User (-l) or Port (-p) from the destination URL if specified
-    const dest_info = cli.parseDestination(merged_args.destination.?);
-    if (dest_info.user) |u| {
-        if (merged_args.ssh_login) |old| allocator.free(old);
-        merged_args.ssh_login = try allocator.dupe(u8, u);
+    // Override SSH User (-l) or Port (-p) from the destination connection endpoint if specified.
+    const destination_endpoint = cli.parseConnectionEndpoint(operational_settings.destination.?);
+    if (destination_endpoint.user) |u| {
+        if (operational_settings.ssh_login) |old| allocator.free(old);
+        operational_settings.ssh_login = try allocator.dupe(u8, u);
     }
-    if (dest_info.port) |p| {
-        if (merged_args.ssh_port) |old| allocator.free(old);
-        merged_args.ssh_port = try allocator.dupe(u8, p);
+    if (destination_endpoint.port) |p| {
+        if (operational_settings.ssh_port) |old| allocator.free(old);
+        operational_settings.ssh_port = try allocator.dupe(u8, p);
     }
 
     // [1/4] Resolving packages...
     std.debug.print("[1/4] Resolving packages...\n", .{});
-    const shell_name = merged_args.shell orelse "zsh";
+    const shell_name = operational_settings.shell orelse "zsh";
     std.debug.print("      - Shell: {s} (xxh-shell-{s})\n", .{ shell_name, shell_name });
-    for (merged_args.plugins.items) |plugin_name| {
+    for (operational_settings.plugins.items) |plugin_name| {
         std.debug.print("      - Plugins: {s}\n", .{plugin_name});
     }
-    for (merged_args.binaries.items) |repo| {
+    for (operational_settings.binaries.items) |repo| {
         std.debug.print("      - Binaries: {s}\n", .{repo});
     }
 
-    const resolved_shell = try package.resolvePackage(allocator, shell_name, true);
-    defer package.freeResolvedPackage(allocator, resolved_shell);
+    const resolved_shell = try package.fetchPackageVitals(allocator, shell_name, true);
+    defer package.releasePackageVitals(allocator, resolved_shell);
 
     // [2/4] Downloading & caching...
     std.debug.print("[2/4] Downloading & caching...\n", .{});
 
-    const shell_path = try package.downloadAndCachePackage(allocator, resolved_shell, true, merged_args.install_force, merged_args.local_zzh_home);
-    defer allocator.free(shell_path);
+    const cached_shell_directory = try package.obtainAndCachePackage(allocator, resolved_shell, true, operational_settings.install_force, operational_settings.local_zzh_home);
+    defer allocator.free(cached_shell_directory);
 
-    // 7. Resolve and download plugin packages
-    var plugin_paths = std.ArrayList([]const u8).init(allocator);
+    var cached_plugin_directories = std.ArrayList([]const u8).init(allocator);
     defer {
-        for (plugin_paths.items) |p| allocator.free(p);
-        plugin_paths.deinit();
+        for (cached_plugin_directories.items) |p| allocator.free(p);
+        cached_plugin_directories.deinit();
     }
 
-    for (merged_args.plugins.items) |plugin_name| {
-        const resolved_plugin = try package.resolvePackage(allocator, plugin_name, false);
-        defer package.freeResolvedPackage(allocator, resolved_plugin);
+    for (operational_settings.plugins.items) |plugin_name| {
+        const resolved_plugin = try package.fetchPackageVitals(allocator, plugin_name, false);
+        defer package.releasePackageVitals(allocator, resolved_plugin);
 
-        const plugin_path = try package.downloadAndCachePackage(allocator, resolved_plugin, false, merged_args.install_force, merged_args.local_zzh_home);
-        try plugin_paths.append(plugin_path);
+        const plugin_path = try package.obtainAndCachePackage(allocator, resolved_plugin, false, operational_settings.install_force, operational_settings.local_zzh_home);
+        try cached_plugin_directories.append(plugin_path);
     }
 
-    // Check if we need to prompt for a password preemptively
-    if (merged_args.password == null) {
-        if (!try deploy.checkPasswordless(allocator, &merged_args)) {
-            var prompt_buf: [256]u8 = undefined;
-            const prompt = try std.fmt.bufPrint(&prompt_buf, "{s}'s password: ", .{merged_args.destination.?});
-            const pwd = try cli.readPassword(allocator, prompt);
-            merged_args.password = pwd;
+    // Query for user password securely before archiving and launching connections 
+    // if passwordless access fails and no password was passed on command line.
+    if (operational_settings.password == null) {
+        if (!try deploy.checkPasswordless(allocator, &operational_settings)) {
+            var prompt_buffer: [256]u8 = undefined;
+            const user_prompt = try std.fmt.bufPrint(&prompt_buffer, "{s}'s password: ", .{operational_settings.destination.?});
+            const input_password = try cli.readMaskedPasswordFromTerminal(allocator, user_prompt);
+            operational_settings.password = input_password;
         }
     }
 
-    // 8. If ++tmux, auto-download static tmux binary if not already cached locally.
-    //    downloadTmux is a no-op when ~/.zzh/bin/tmux already exists (unless +if).
-    if (merged_args.tmux) {
-        const tmux_path = try package.downloadTmux(allocator, merged_args.install_force, merged_args.local_zzh_home);
-        allocator.free(tmux_path);
+    var remote_target: ?deploy.RemoteTarget = null;
+    defer {
+        if (remote_target) |rt| {
+            allocator.free(rt.os);
+            allocator.free(rt.arch);
+        }
     }
 
-    // 8.5 Download any static binaries requested via +b
-    for (merged_args.binaries.items) |repo| {
-        try package.downloadBinary(allocator, repo, merged_args.install_force, merged_args.local_zzh_home);
+    if (operational_settings.tmux or operational_settings.binaries.items.len > 0) {
+        std.debug.print("      - Detecting remote host system architecture...\n", .{});
+        remote_target = try deploy.detectRemoteTarget(allocator, &operational_settings);
     }
 
-    // 9. Bundle payload
-    const bundle = try bundler.buildPayload(allocator, shell_path, plugin_paths.items, &merged_args);
-    defer bundler.cleanupBundle(allocator, bundle);
+    if (operational_settings.tmux) {
+        const target = remote_target.?;
+        const cached_tmux_path = try package.provisionStaticallyCompiledTmux(
+            allocator,
+            operational_settings.install_force,
+            operational_settings.local_zzh_home,
+            target.arch,
+        );
+        allocator.free(cached_tmux_path);
+    }
 
-    // 9. Deploy and connect
-    try deploy.deployAndConnect(allocator, &merged_args, bundle.archive_path, bundle.temp_build_dir);
+    for (operational_settings.binaries.items) |repo| {
+        const target = remote_target.?;
+        try package.provisionStaticallyCompiledBinary(
+            allocator,
+            repo,
+            operational_settings.install_force,
+            operational_settings.local_zzh_home,
+            operational_settings.config_path orelse "~/.config/zzh/config.zzhc",
+            target.os,
+            target.arch,
+        );
+    }
+
+    // Staging and creating plain tar bundle file to deploy.
+    const deployment_bundle = try bundler.assembleDeploymentPayload(allocator, cached_shell_directory, cached_plugin_directories.items, &operational_settings);
+    defer bundler.discardStagingArea(allocator, deployment_bundle);
+
+    try deploy.deployAndConnect(allocator, &operational_settings, deployment_bundle.tarball_output_path, deployment_bundle.staging_area_path);
 }
 
 test "simple test" {
     var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
+    defer list.deinit();
     try list.append(42);
     try std.testing.expectEqual(@as(i32, 42), list.pop());
 }

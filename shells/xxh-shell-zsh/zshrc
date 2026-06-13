@@ -41,4 +41,9 @@ for pluginrc_file in $(find $CURRENT_DIR/../../../../../plugins/*/build -type f 
 done
 setopt -o nomatch
 
+# Source user's standard zshrc if it exists in their HOME
+if [[ -f "$HOME/.zshrc" ]]; then
+  source "$HOME/.zshrc"
+fi
+
 cd ~
