@@ -252,7 +252,8 @@ pub fn compileStagedScript(allocator: std.mem.Allocator, zzh_args: *const cli.Op
             \\for src_base in $_zzh_current_src; do
             \\  basename=$1;
             \\  shift;
-            \\  _zzh_src="$XXH_HOME/.zzh/dotfiles/$src_base";
+            \\  _zzh_src="{s}/.zzh/dotfiles/$src_base";
+            \\  _zzh_src=$(eval echo "$_zzh_src");
             \\  _zzh_dst="~/$basename";
             \\  _zzh_dst=$(eval echo "$_zzh_dst");
             \\  if [ -L "$_zzh_dst" ]; then
@@ -317,7 +318,7 @@ pub fn compileStagedScript(allocator: std.mem.Allocator, zzh_args: *const cli.Op
             \\    ln -sf "$_zzh_src" "$_zzh_dst";
             \\  fi;
             \\done;
-        , .{ joined_basenames, joined_remotes });
+        , .{ joined_basenames, joined_remotes, escaped_home });
         defer allocator.free(script);
         const b_b64 = try b64Encode(allocator, script);
         defer allocator.free(b_b64);

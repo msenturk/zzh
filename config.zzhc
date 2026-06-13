@@ -14,10 +14,6 @@ settings:
 
 # Custom download links for static binaries. 
 # Bypasses the GitHub API lookup when downloading binaries using the '+b' command-line flag or hosts configuration.
-bin_urls:
-  - BurntSushi/ripgrep
-  - sharkdp/fd
-  - sharkdp/bat
 
 hosts:
   # Default settings applied to every connection.
