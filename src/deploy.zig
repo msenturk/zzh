@@ -337,19 +337,42 @@ pub fn compileStagedScript(allocator: std.mem.Allocator, zzh_args: *const cli.Op
         try session_builder.appendSlice(" -b ");
         try session_builder.appendSlice(b_b64);
 
-        const is_bash = std.mem.eql(u8, shell, "bash") or
-            std.mem.eql(u8, shell, "xxh-shell-bash");
-        const is_zsh = std.mem.eql(u8, shell, "zsh") or
-            std.mem.eql(u8, shell, "xxh-shell-zsh");
+        const is_bash = std.mem.eql(u8, shell, "bash") or std.mem.eql(u8, shell, "xxh-shell-bash");
+        const is_zsh = std.mem.eql(u8, shell, "zsh") or std.mem.eql(u8, shell, "xxh-shell-zsh");
+        const is_fish = std.mem.eql(u8, shell, "fish") or std.mem.eql(u8, shell, "xxh-shell-fish");
+        const is_xonsh = std.mem.eql(u8, shell, "xonsh") or std.mem.eql(u8, shell, "xxh-shell-xonsh");
+        const is_nu = std.mem.eql(u8, shell, "nu") or std.mem.eql(u8, shell, "nushell") or std.mem.eql(u8, shell, "xxh-shell-nu");
 
-        if (is_bash or is_zsh) {
+        if (is_bash or is_zsh or is_fish or is_xonsh or is_nu) {
             const rc_files = if (is_bash)
                 &[_][]const u8{ ".bashrc", ".bash_aliases", ".bash_profile" }
+            else if (is_zsh)
+                &[_][]const u8{ ".zshrc", ".zprofile", ".profile" }
+            else if (is_fish)
+                &[_][]const u8{"config.fish"}
+            else if (is_xonsh)
+                &[_][]const u8{ "xonshrc", ".xonshrc" }
             else
-                &[_][]const u8{ ".zshrc", ".zprofile", ".profile" };
+                &[_][]const u8{"config.nu"};
+
+            const target_rc_rel = if (is_bash)
+                "shells/xxh-shell-bash/build/bashrc"
+            else if (is_zsh)
+                "shells/xxh-shell-zsh/build/.zshrc"
+            else if (is_fish)
+                "shells/xxh-shell-fish/build/config/fish/config.fish"
+            else if (is_xonsh)
+                "shells/xxh-shell-xonsh/build/xonshrc"
+            else
+                "shells/xxh-shell-nu/build/config.nu";
 
             var source_lines = std.ArrayList(u8).init(allocator);
             defer source_lines.deinit();
+
+            var nu_basename: ?[]const u8 = null;
+            defer {
+                if (nu_basename) |nb| allocator.free(nb);
+            }
 
             for (zzh_args.dotfiles.items) |d| {
                 var local_path = d;
@@ -359,33 +382,63 @@ pub fn compileStagedScript(allocator: std.mem.Allocator, zzh_args: *const cli.Op
                     remote_name = d[colon_idx + 1 ..];
                 }
                 const basename = remote_name orelse std.fs.path.basename(local_path);
+                const file_only = std.fs.path.basename(basename);
 
                 for (rc_files) |rc| {
-                    if (std.mem.eql(u8, basename, rc)) {
-                        try source_lines.writer().print(
-                            "[ -f ~/{s} ] && . ~/{s}\n",
-                            .{ basename, basename },
-                        );
+                    if (std.mem.eql(u8, file_only, rc)) {
+                        if (is_bash or is_zsh) {
+                            try source_lines.writer().print(
+                                "[ -f ~/{s} ] && . ~/{s}\n",
+                                .{ basename, basename },
+                            );
+                        } else if (is_fish) {
+                            try source_lines.writer().print(
+                                "if test -f ~/{s}; source ~/{s}; end\n",
+                                .{ basename, basename },
+                            );
+                        } else if (is_xonsh) {
+                            try source_lines.writer().print(
+                                "import os; _rc = os.path.expanduser('~/{s}'); os.path.exists(_rc) and exec(open(_rc).read())\n",
+                                .{basename},
+                            );
+                        } else if (is_nu) {
+                            try source_lines.writer().print(
+                                "source \"~/{s}\"\n",
+                                .{basename},
+                            );
+                            if (nu_basename == null) {
+                                nu_basename = try allocator.dupe(u8, basename);
+                            }
+                        }
                         break;
                     }
                 }
             }
 
             if (source_lines.items.len > 0) {
-                const target_rc_rel = if (is_bash)
-                    "shells/xxh-shell-bash/build/bashrc"
-                else
-                    "shells/xxh-shell-zsh/build/.zshrc";
-
-                const inject = try std.fmt.allocPrint(allocator,
-                    \\_zzh_rc="{s}/.zzh/{s}";
-                    \\if [ -f "$_zzh_rc" ]; then
-                    \\  if ! grep -qF "# zzh-user-dotfiles" "$_zzh_rc" 2>/dev/null; then
-                    \\    printf '\n# zzh-user-dotfiles\n{s}' >> "$_zzh_rc";
-                    \\  fi;
-                    \\fi;
-                    \\unset _zzh_rc;
-                , .{ host_zzh_home, target_rc_rel, source_lines.items });
+                var inject: []const u8 = undefined;
+                if (is_nu and nu_basename != null) {
+                    inject = try std.fmt.allocPrint(allocator,
+                        \\_dir=$(dirname ~/{s}); mkdir -p "$_dir" && touch ~/{s};
+                        \\_zzh_rc="{s}/.zzh/{s}";
+                        \\if [ -f "$_zzh_rc" ]; then
+                        \\  if ! grep -qF "# zzh-user-dotfiles" "$_zzh_rc" 2>/dev/null; then
+                        \\    printf '\n# zzh-user-dotfiles\n{s}' >> "$_zzh_rc";
+                        \\  fi;
+                        \\fi;
+                        \\unset _zzh_rc;
+                    , .{ nu_basename.?, nu_basename.?, host_zzh_home, target_rc_rel, source_lines.items });
+                } else {
+                    inject = try std.fmt.allocPrint(allocator,
+                        \\_zzh_rc="{s}/.zzh/{s}";
+                        \\if [ -f "$_zzh_rc" ]; then
+                        \\  if ! grep -qF "# zzh-user-dotfiles" "$_zzh_rc" 2>/dev/null; then
+                        \\    printf '\n# zzh-user-dotfiles\n{s}' >> "$_zzh_rc";
+                        \\  fi;
+                        \\fi;
+                        \\unset _zzh_rc;
+                    , .{ host_zzh_home, target_rc_rel, source_lines.items });
+                }
                 defer allocator.free(inject);
                 const inject_b64 = try b64Encode(allocator, inject);
                 defer allocator.free(inject_b64);
@@ -1141,14 +1194,14 @@ test "Remote Command Builder Test - Comprehensive" {
 
     // Verify dotfiles sourcing (bash-specific injection)
     const expected_source =
-        \\_zzh_bashrc="/custom/home/.zzh/shells/xxh-shell-bash/build/bashrc";
-        \\if [ -f "$_zzh_bashrc" ]; then
-        \\  if ! grep -qF "# zzh-user-dotfiles" "$_zzh_bashrc" 2>/dev/null; then
+        \\_zzh_rc="/custom/home/.zzh/shells/xxh-shell-bash/build/bashrc";
+        \\if [ -f "$_zzh_rc" ]; then
+        \\  if ! grep -qF "# zzh-user-dotfiles" "$_zzh_rc" 2>/dev/null; then
         \\    printf '\n# zzh-user-dotfiles\n[ -f ~/.bashrc ] && . ~/.bashrc
-        \\' >> "$_zzh_bashrc";
+        \\' >> "$_zzh_rc";
         \\  fi;
         \\fi;
-        \\unset _zzh_bashrc;
+        \\unset _zzh_rc;
     ;
     const expected_source_b64 = try b64Encode(testing.allocator, expected_source);
     defer testing.allocator.free(expected_source_b64);
