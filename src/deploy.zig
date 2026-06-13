@@ -1010,7 +1010,7 @@ test "Remote Command Builder Test" {
     const cmd = try std.mem.join(testing.allocator, " && ", &.{ staged_script.bootstrap_script, staged_script.session_script });
     defer testing.allocator.free(cmd);
 
-    try testing.expectEqualStrings("mkdir -p ~/'.zzh' && tar -xmf - -C ~/'.zzh' && ln -sf .zzh ~/'.zzh'/.xxh && chmod -R +x ~/'.zzh' 2>/dev/null || true && ~/'.zzh'/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -e PATH=JFhYSF9IT01FL2JpbjokUEFUSA== -e VAR1=VkFMMQ==", cmd);
+    try testing.expectEqualStrings("mkdir -p ~/'.zzh' && tar -xmf - -C ~/'.zzh' && ln -sf .zzh ~/'.zzh'/.xxh && chmod -R +x ~/'.zzh' 2>/dev/null || true && ~/'.zzh'/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -b ZXhwb3J0IFBBVEg9IiRYWEhfSE9NRS9iaW46L3Vzci9sb2NhbC9zYmluOi91c3IvbG9jYWwvYmluOi91c3Ivc2JpbjovdXNyL2Jpbjovc2JpbjovYmluOiRQQVRIIg== -e VAR1=VkFMMQ== -H ~", cmd);
 }
 
 test "Remote Command Builder Test - Comprehensive" {
@@ -1055,7 +1055,7 @@ test "Remote Command Builder Test - Comprehensive" {
     // Verify commands inside cmd
     try testing.expect(std.mem.indexOf(u8, cmd, "rm -rf '/custom/home' &&") != null);
     try testing.expect(std.mem.indexOf(u8, cmd, "mkdir -p '/custom/home' && tar -xmf - -C '/custom/home' && ln -sf .zzh '/custom/home'/.xxh && chmod -R +x '/custom/home'") != null);
-    try testing.expect(std.mem.indexOf(u8, cmd, " -e PATH=") != null);
+    try testing.expect(std.mem.indexOf(u8, cmd, " -b ZXhwb3J0IFBBVEg") != null);
     try testing.expect(std.mem.indexOf(u8, cmd, " -f \"script.sh\"") != null);
     try testing.expect(std.mem.indexOf(u8, cmd, " -C ZWNobyBoZWxsbw==") != null); // base64 of "echo hello"
     try testing.expect(std.mem.indexOf(u8, cmd, " -v 2") != null);
