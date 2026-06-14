@@ -6,7 +6,14 @@ pub var global_environ: std.process.Environ = .empty;
 /// We query the environment because shell profiles and tool configurations (like SSH config)
 /// are anchored to the user's home path.
 pub fn discoverUserHomeDirectory(allocator: std.mem.Allocator) ?[]const u8 {
-    if (@import("builtin").is_test) return allocator.dupe(u8, "/mock/home") catch null;
+    if (@import("builtin").is_test) {
+        var threaded_io = std.Io.Threaded.init(allocator, .{});
+        defer threaded_io.deinit();
+        var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const len = std.Io.Dir.cwd().realPathFile(threaded_io.io(), ".", &buf) catch return null;
+        const cwd_path = buf[0..len];
+        return std.fs.path.join(allocator, &.{ cwd_path, "mock_home" }) catch null;
+    }
     var environment_variables = std.process.Environ.createMap(global_environ, allocator) catch return null;
     defer environment_variables.deinit();
     return locateHomeDirectoryInEnvironment(allocator, &environment_variables);
