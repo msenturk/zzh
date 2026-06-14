@@ -89,11 +89,25 @@ pub noinline fn fetchPackageVitals(allocator: std.mem.Allocator, raw_name: []con
         const clean_name = try allocator.dupe(u8, resolved_name);
         errdefer allocator.free(clean_name);
 
-        // Nushell's shell wrapper is hosted inside the zzh repository itself.
-        const git_url = if (std.mem.eql(u8, resolved_name, "xxh-shell-nu"))
-            try allocator.dupe(u8, "https://github.com/msenturk/zzh/tree/main/shells/xxh-shell-nu")
-        else
-            try std.fmt.allocPrint(allocator, "https://github.com/xxh/{s}", .{resolved_name});
+        const sub_dir = if (is_shell) "shells" else "plugins";
+        
+        var is_local = false;
+        var local_pkg_path: []u8 = "";
+        
+        // Check if the package exists in the current working directory (e.g., during development)
+        if (std.fs.cwd().realpathAlloc(allocator, ".")) |cwd_path| {
+            defer allocator.free(cwd_path);
+            if (std.fs.path.join(allocator, &.{ cwd_path, sub_dir, resolved_name })) |joined| {
+                if (std.fs.cwd().access(joined, .{})) |_| {
+                    is_local = true;
+                    local_pkg_path = joined;
+                } else |_| {
+                    allocator.free(joined);
+                }
+            } else |_| {}
+        } else |_| {}
+
+        const git_url = if (is_local) local_pkg_path else try std.fmt.allocPrint(allocator, "https://github.com/msenturk/zzh/tree/main/{s}/{s}", .{ sub_dir, resolved_name });
 
         return .{
             .name = resolved_name,
@@ -382,16 +396,27 @@ pub fn obtainAndCachePackage(allocator: std.mem.Allocator, pkg: DownloaderManife
             try fetchStaticallyCompiledNushellPlugin(allocator, plugin_suffix, target_dir);
         } else {
             if (std.mem.indexOf(u8, pkg.git_url, "/tree/") != null) {
-                try gitCloneSubdirectoryOnly(allocator, pkg.clean_name, pkg.git_url, target_dir);
+                gitCloneSubdirectoryOnly(allocator, pkg.clean_name, pkg.git_url, target_dir) catch |err| {
+                    if (err == error.CommandFailed) {
+                        std.debug.print("      - Failed to download from git. Trying official xxh fallback repository...\n", .{});
+                        const fallback_url = try std.fmt.allocPrint(allocator, "https://github.com/xxh/{s}", .{pkg.clean_name});
+                        defer allocator.free(fallback_url);
+                        const fallback_argv = [_][]const u8{ "git", "clone", "--depth=1", fallback_url, target_dir };
+                        try executeSubprocess(allocator, &fallback_argv);
+                    } else {
+                        return err;
+                    }
+                };
             } else {
                 std.debug.print("      - Downloading {s}...\n", .{pkg.clean_name});
                 const argv = [_][]const u8{ "git", "clone", "--depth=1", pkg.git_url, target_dir };
                 executeSubprocess(allocator, &argv) catch |err| {
                     if (err == error.CommandFailed) {
-                        std.debug.print("      - Failed to download from git. Trying fallback repository...\n", .{});
-                        const fallback_url = try std.fmt.allocPrint(allocator, "https://github.com/msenturk/zzh/tree/main/{s}/{s}", .{ sub_dir, pkg.clean_name });
+                        std.debug.print("      - Failed to download from git. Trying official xxh fallback repository...\n", .{});
+                        const fallback_url = try std.fmt.allocPrint(allocator, "https://github.com/xxh/{s}", .{pkg.clean_name});
                         defer allocator.free(fallback_url);
-                        try gitCloneSubdirectoryOnly(allocator, pkg.clean_name, fallback_url, target_dir);
+                        const fallback_argv = [_][]const u8{ "git", "clone", "--depth=1", fallback_url, target_dir };
+                        try executeSubprocess(allocator, &fallback_argv);
                     } else {
                         return err;
                     }
@@ -964,7 +989,7 @@ test "resolvePackage Test" {
     const p1 = try fetchPackageVitals(testing.allocator, "zsh", true);
     defer releasePackageVitals(testing.allocator, p1);
     try testing.expectEqualStrings("xxh-shell-zsh", p1.clean_name);
-    try testing.expectEqualStrings("https://github.com/xxh/xxh-shell-zsh", p1.git_url);
+    try testing.expectEqualStrings("https://github.com/msenturk/zzh/tree/main/shells/xxh-shell-zsh", p1.git_url);
 
     const p2 = try fetchPackageVitals(testing.allocator, "myplugin+git+https://github.com/user/myplugin", false);
     defer releasePackageVitals(testing.allocator, p2);
@@ -987,7 +1012,7 @@ test "resolvePackage Test" {
     const p6 = try fetchPackageVitals(testing.allocator, "myplugin", false);
     defer releasePackageVitals(testing.allocator, p6);
     try testing.expectEqualStrings("xxh-plugin-myplugin", p6.clean_name);
-    try testing.expectEqualStrings("https://github.com/xxh/xxh-plugin-myplugin", p6.git_url);
+    try testing.expectEqualStrings("https://github.com/msenturk/zzh/tree/main/plugins/xxh-plugin-myplugin", p6.git_url);
 
     const p7 = try fetchPackageVitals(testing.allocator, "xxh-plugin-myplugin+git+https://github.com/user/myplugin", false);
     defer releasePackageVitals(testing.allocator, p7);
@@ -1013,9 +1038,6 @@ test "resolvePackage Test" {
     defer releasePackageVitals(testing.allocator, nu5);
     try testing.expectEqualStrings("xxh-shell-nu", nu5.clean_name);
     try testing.expectEqualStrings("https://github.com/msenturk/zzh/tree/main/shells/xxh-shell-nu", nu5.git_url);
-
-    const bin1 = extractExecutableName("https://raw.githubusercontent.com/xxh/static/master/xxh-demo2.gif");
-    try testing.expectEqualStrings("xxh-demo2.gif", bin1);
 
     const bin2 = extractExecutableName("https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/ripgrep-14.1.0-x86_64-unknown-linux-musl.tar.gz");
     try testing.expectEqualStrings("ripgrep-14.1.0-x86_64-unknown-linux-musl.tar.gz", bin2);

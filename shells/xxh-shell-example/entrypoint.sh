@@ -102,7 +102,7 @@ export XXH_HOME=`readlink -f $CURRENT_DIR/../../../..`
 #fi
 
 if [[ $HOMEPATH != '' ]]; then
-  homerealpath=`readlink -f $HOMEPATH`
+  homerealpath=$(eval echo "$HOMEPATH")
   if [[ -d $homerealpath ]]; then
     export HOME=$homerealpath
   else
@@ -115,7 +115,7 @@ else
 fi
 
 if [[ $XDGPATH != '' ]]; then
-  xdgrealpath=`readlink -f $XDGPATH`
+  xdgrealpath=$(eval echo "$XDGPATH")
   if [[ ! -d $xdgrealpath ]]; then
     echo "XDG path not found: $xdgrealpath"
     echo "Set XDG path to $XXH_HOME"

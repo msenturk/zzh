@@ -30,6 +30,14 @@ for pluginrc_file in $(find $CURRENT_DIR/../../../plugins/*/build -type f -name 
   fi
 done
 
+# Many standard user .bashrc files contain a check like `[ -z "$PS1" ] && return`
+# to exit early if the shell is not interactive. When bash is invoked with
+# --rcfile, it may not source /etc/bash.bashrc, leaving PS1 unset.
+# We set a dummy PS1 here so the user's .bashrc doesn't bail out early.
+if [ -z "$PS1" ]; then
+  PS1='\s-\v\$ '
+fi
+
 # Source user's standard bashrc if it exists in their HOME
 if [ -f "$HOME/.bashrc" ]; then
   source "$HOME/.bashrc"

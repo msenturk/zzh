@@ -56,7 +56,7 @@ export XXH_HOME=`readlink -f $CURRENT_DIR/../../../..`
 
 # Apply HOMEPATH override if set
 if [[ $HOMEPATH != '' ]]; then
-  homerealpath=`readlink -f $HOMEPATH`
+  homerealpath=$(eval echo "$HOMEPATH")
   if [[ -d $homerealpath ]]; then
     export HOME=$homerealpath
   fi
