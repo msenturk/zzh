@@ -57,11 +57,33 @@ jobs:
             rm -rf zig-out
           done
 
+      - name: Package Shells and Plugins
+        shell: bash
+        run: |
+          mkdir -p release-packages
+          
+          # Package all shells
+          for dir in shells/*/; do
+            if [ -d "$dir" ]; then
+              base=$(basename "$dir")
+              tar -czf "release-packages/${base}.tar.gz" -C shells "$base"
+            fi
+          done
+          
+          # Package all plugins
+          for dir in plugins/*/; do
+            if [ -d "$dir" ]; then
+              base=$(basename "$dir")
+              tar -czf "release-packages/${base}.tar.gz" -C plugins "$base"
+            fi
+          done
+
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             zzh-${{ github.ref_name }}-*.tar.gz
             zzh-${{ github.ref_name }}-*.zip
+            release-packages/*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
