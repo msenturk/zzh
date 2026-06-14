@@ -225,7 +225,7 @@ fn downloadAndExtractTarball(allocator: std.mem.Allocator, package_name: []const
         try req.wait();
 
         if (req.response.status == .found or req.response.status == .moved_permanently) {
-            if (req.response.headers.getFirstValue("Location")) |loc| {
+            if (req.response.location) |loc| {
                 allocator.free(current_url);
                 current_url = try allocator.dupe(u8, loc);
                 continue;
@@ -1085,12 +1085,13 @@ const FailableAllocator = struct {
             .vtable = &.{
                 .alloc = alloc,
                 .resize = resize,
+                .remap = remap,
                 .free = free,
             },
         };
     }
 
-    fn alloc(ctx: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
+    fn alloc(ctx: *anyopaque, len: usize, ptr_align: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
         const self: *Self = @alignCast(@ptrCast(ctx));
         self.alloc_count += 1;
         if (self.alloc_count > self.fail_index) {
@@ -1099,12 +1100,17 @@ const FailableAllocator = struct {
         return self.allocator.rawAlloc(len, ptr_align, ret_addr);
     }
 
-    fn resize(ctx: *anyopaque, buf: []u8, buf_align: u8, new_len: usize, ret_addr: usize) bool {
+    fn resize(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
         const self: *Self = @alignCast(@ptrCast(ctx));
         return self.allocator.rawResize(buf, buf_align, new_len, ret_addr);
     }
 
-    fn free(ctx: *anyopaque, buf: []u8, buf_align: u8, ret_addr: usize) void {
+    fn remap(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+        const self: *Self = @alignCast(@ptrCast(ctx));
+        return self.allocator.rawRemap(buf, buf_align, new_len, ret_addr);
+    }
+
+    fn free(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {
         const self: *Self = @alignCast(@ptrCast(ctx));
         self.allocator.rawFree(buf, buf_align, ret_addr);
     }
