@@ -112,23 +112,23 @@ pub const OperationalConfig = struct {
 
     pub fn init(allocator: std.mem.Allocator) OperationalConfig {
         return .{
-            .plugins = std.ArrayList([]const u8).init(allocator),
-            .env = std.ArrayList([]const u8).init(allocator),
-            .envb = std.ArrayList([]const u8).init(allocator),
-            .dotfiles = std.ArrayList([]const u8).init(allocator),
-            .binaries = std.ArrayList([]const u8).init(allocator),
-            .host_execute_bash = std.ArrayList([]const u8).init(allocator),
-            .install_zzh_packages = std.ArrayList([]const u8).init(allocator),
-            .list_zzh_packages = std.ArrayList([]const u8).init(allocator),
-            .reinstall_zzh_packages = std.ArrayList([]const u8).init(allocator),
-            .remove_zzh_packages = std.ArrayList([]const u8).init(allocator),
-            .ssh_options = std.ArrayList([]const u8).init(allocator),
-            .ssh_args = std.ArrayList([]const u8).init(allocator),
+            .plugins = std.ArrayList([]const u8).empty,
+            .env = std.ArrayList([]const u8).empty,
+            .envb = std.ArrayList([]const u8).empty,
+            .dotfiles = std.ArrayList([]const u8).empty,
+            .binaries = std.ArrayList([]const u8).empty,
+            .host_execute_bash = std.ArrayList([]const u8).empty,
+            .install_zzh_packages = std.ArrayList([]const u8).empty,
+            .list_zzh_packages = std.ArrayList([]const u8).empty,
+            .reinstall_zzh_packages = std.ArrayList([]const u8).empty,
+            .remove_zzh_packages = std.ArrayList([]const u8).empty,
+            .ssh_options = std.ArrayList([]const u8).empty,
+            .ssh_args = std.ArrayList([]const u8).empty,
             .allocator = allocator,
         };
     }
 
-    pub fn deinit(self: *OperationalConfig) void {
+    pub fn deinit(self: *OperationalConfig, allocator: std.mem.Allocator) void {
         if (self.shell) |s| self.allocator.free(s);
         if (self.config_path) |c| self.allocator.free(c);
         if (self.local_zzh_home) |lh| self.allocator.free(lh);
@@ -150,29 +150,29 @@ pub const OperationalConfig = struct {
         if (self.tmux_session) |s| self.allocator.free(s);
 
         for (self.plugins.items) |p| self.allocator.free(p);
-        self.plugins.deinit();
+        self.plugins.deinit(allocator);
         for (self.env.items) |e| self.allocator.free(e);
-        self.env.deinit();
+        self.env.deinit(allocator);
         for (self.envb.items) |e| self.allocator.free(e);
-        self.envb.deinit();
+        self.envb.deinit(allocator);
         for (self.dotfiles.items) |d| self.allocator.free(d);
-        self.dotfiles.deinit();
+        self.dotfiles.deinit(allocator);
         for (self.host_execute_bash.items) |b| self.allocator.free(b);
-        self.host_execute_bash.deinit();
+        self.host_execute_bash.deinit(allocator);
         for (self.install_zzh_packages.items) |p| self.allocator.free(p);
-        self.install_zzh_packages.deinit();
+        self.install_zzh_packages.deinit(allocator);
         for (self.list_zzh_packages.items) |p| self.allocator.free(p);
-        self.list_zzh_packages.deinit();
+        self.list_zzh_packages.deinit(allocator);
         for (self.reinstall_zzh_packages.items) |p| self.allocator.free(p);
-        self.reinstall_zzh_packages.deinit();
+        self.reinstall_zzh_packages.deinit(allocator);
         for (self.remove_zzh_packages.items) |p| self.allocator.free(p);
-        self.remove_zzh_packages.deinit();
+        self.remove_zzh_packages.deinit(allocator);
         for (self.binaries.items) |b| self.allocator.free(b);
-        self.binaries.deinit();
+        self.binaries.deinit(allocator);
         for (self.ssh_options.items) |o| self.allocator.free(o);
-        self.ssh_options.deinit();
+        self.ssh_options.deinit(allocator);
         for (self.ssh_args.items) |s| self.allocator.free(s);
-        self.ssh_args.deinit();
+        self.ssh_args.deinit(allocator);
     }
 };
 
@@ -224,7 +224,7 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
                 std.debug.print("Error: Missing argument for '{s}'\n", .{token});
                 std.process.exit(1);
             }
-            try settings.ssh_options.append(try allocator.dupe(u8, tokens[token_idx]));
+            try settings.ssh_options.append(allocator, try allocator.dupe(u8, tokens[token_idx]));
         } else if (std.mem.eql(u8, token, "+c") or std.mem.eql(u8, token, "++ssh-command")) {
             token_idx += 1;
             if (token_idx >= tokens.len) {
@@ -265,21 +265,21 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
                 std.debug.print("Error: Missing argument for '{s}'\n", .{token});
                 std.process.exit(1);
             }
-            try settings.env.append(try allocator.dupe(u8, tokens[token_idx]));
+            try settings.env.append(allocator, try allocator.dupe(u8, tokens[token_idx]));
         } else if (std.mem.eql(u8, token, "+eb") or std.mem.eql(u8, token, "++envb")) {
             token_idx += 1;
             if (token_idx >= tokens.len) {
                 std.debug.print("Error: Missing argument for '{s}'\n", .{token});
                 std.process.exit(1);
             }
-            try settings.envb.append(try allocator.dupe(u8, tokens[token_idx]));
+            try settings.envb.append(allocator, try allocator.dupe(u8, tokens[token_idx]));
         } else if (std.mem.eql(u8, token, "+d") or std.mem.eql(u8, token, "++dotfile")) {
             token_idx += 1;
             if (token_idx >= tokens.len) {
                 std.debug.print("Error: Missing argument for '{s}'\n", .{token});
                 std.process.exit(1);
             }
-            try settings.dotfiles.append(try allocator.dupe(u8, tokens[token_idx]));
+            try settings.dotfiles.append(allocator, try allocator.dupe(u8, tokens[token_idx]));
         } else if (std.mem.eql(u8, token, "++update")) {
             settings.update_packages = true;
         } else if (std.mem.eql(u8, token, "++tmux")) {
@@ -350,7 +350,7 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
                 std.debug.print("Error: Missing argument for '{s}'\n", .{token});
                 std.process.exit(1);
             }
-            try settings.host_execute_bash.append(try allocator.dupe(u8, tokens[token_idx]));
+            try settings.host_execute_bash.append(allocator, try allocator.dupe(u8, tokens[token_idx]));
         } else if (std.mem.eql(u8, token, "+s") or std.mem.eql(u8, token, "++shell") or std.mem.eql(u8, token, "+shell")) {
             token_idx += 1;
             if (token_idx >= tokens.len) {
@@ -371,8 +371,8 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
                 std.debug.print("Error: Missing argument for '{s}'\n", .{token});
                 std.process.exit(1);
             }
-            try settings.install_zzh_packages.append(try allocator.dupe(u8, tokens[token_idx]));
-            try settings.plugins.append(try allocator.dupe(u8, tokens[token_idx]));
+            try settings.install_zzh_packages.append(allocator, try allocator.dupe(u8, tokens[token_idx]));
+            try settings.plugins.append(allocator, try allocator.dupe(u8, tokens[token_idx]));
         } else if (std.mem.eql(u8, token, "+L") or std.mem.eql(u8, token, "++list-zzh-packages")) {
             settings.has_list_zzh_packages = true;
             while (token_idx + 1 < tokens.len) {
@@ -381,7 +381,7 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
                     break;
                 }
                 token_idx += 1;
-                try settings.list_zzh_packages.append(try allocator.dupe(u8, tokens[token_idx]));
+                try settings.list_zzh_packages.append(allocator, try allocator.dupe(u8, tokens[token_idx]));
             }
         } else if (std.mem.eql(u8, token, "+RI") or std.mem.eql(u8, token, "++reinstall-zzh-packages")) {
             token_idx += 1;
@@ -389,21 +389,21 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
                 std.debug.print("Error: Missing argument for '{s}'\n", .{token});
                 std.process.exit(1);
             }
-            try settings.reinstall_zzh_packages.append(try allocator.dupe(u8, tokens[token_idx]));
+            try settings.reinstall_zzh_packages.append(allocator, try allocator.dupe(u8, tokens[token_idx]));
         } else if (std.mem.eql(u8, token, "+R") or std.mem.eql(u8, token, "++remove-zzh-packages")) {
             token_idx += 1;
             if (token_idx >= tokens.len) {
                 std.debug.print("Error: Missing argument for '{s}'\n", .{token});
                 std.process.exit(1);
             }
-            try settings.remove_zzh_packages.append(try allocator.dupe(u8, tokens[token_idx]));
+            try settings.remove_zzh_packages.append(allocator, try allocator.dupe(u8, tokens[token_idx]));
         } else if (std.mem.eql(u8, token, "+b") or std.mem.eql(u8, token, "++binary")) {
             token_idx += 1;
             if (token_idx >= tokens.len) {
                 std.debug.print("Error: Missing argument for '{s}'\n", .{token});
                 std.process.exit(1);
             }
-            try settings.binaries.append(try allocator.dupe(u8, tokens[token_idx]));
+            try settings.binaries.append(allocator, try allocator.dupe(u8, tokens[token_idx]));
         } else if (std.mem.eql(u8, token, "+LS") or std.mem.eql(u8, token, "++list-shells") or std.mem.eql(u8, token, "+list-shells")) {
             settings.list_shells = true;
         } else if (std.mem.eql(u8, token, "+LP") or std.mem.eql(u8, token, "++list-plugins") or std.mem.eql(u8, token, "+list-plugins")) {
@@ -447,7 +447,7 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
             // Unrecognized custom command parameter, skip.
         } else if (std.mem.startsWith(u8, token, "-")) {
             // Pass standard and unrecognized options down to SSH execution.
-            try settings.ssh_args.append(try allocator.dupe(u8, token));
+            try settings.ssh_args.append(allocator, try allocator.dupe(u8, token));
             if (token.len == 2) {
                 const opt = token[1];
                 // Consume the next token if this SSH option takes an argument.
@@ -455,7 +455,7 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
                     'b', 'c', 'D', 'E', 'e', 'F', 'i', 'J', 'L', 'l', 'm', 'O', 'o', 'p', 'Q', 'R', 'S', 'W', 'w' => {
                         token_idx += 1;
                         if (token_idx < tokens.len) {
-                            try settings.ssh_args.append(try allocator.dupe(u8, tokens[token_idx]));
+                            try settings.ssh_args.append(allocator, try allocator.dupe(u8, tokens[token_idx]));
                         }
                     },
                     else => {},
@@ -466,7 +466,7 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
             if (settings.destination == null) {
                 settings.destination = try allocator.dupe(u8, token);
             } else {
-                try settings.ssh_args.append(try allocator.dupe(u8, token));
+                try settings.ssh_args.append(allocator, try allocator.dupe(u8, token));
             }
         }
         token_idx += 1;
@@ -476,7 +476,7 @@ pub fn populateConfigFromTokens(allocator: std.mem.Allocator, tokens: []const []
 /// Parses local process command line arguments into our structured operational configuration.
 pub fn parseCommandLineArguments(allocator: std.mem.Allocator) !OperationalConfig {
     var operational_settings = OperationalConfig.init(allocator);
-    errdefer operational_settings.deinit();
+    errdefer operational_settings.deinit(allocator);
 
     var argument_iterator = try std.process.argsWithAllocator(allocator);
     defer argument_iterator.deinit();
@@ -484,7 +484,7 @@ pub fn parseCommandLineArguments(allocator: std.mem.Allocator) !OperationalConfi
     // Skip program execution path
     _ = argument_iterator.next();
 
-    var token_buffer = std.ArrayList([]const u8).init(allocator);
+    var token_buffer = std.ArrayList([]const u8).empty;
     defer token_buffer.deinit();
 
     while (argument_iterator.next()) |token| {
@@ -520,7 +520,7 @@ pub fn readMaskedPasswordFromTerminal(allocator: std.mem.Allocator, user_prompt:
 
         var password_buffer: [1024]u8 = undefined;
         const input_line = try stdin.reader().readUntilDelimiterOrEof(&password_buffer, '\n');
-        try stdout.print("\n", .{});
+        try stdout.print("\n");
         if (input_line) |line| {
             var line_length = line.len;
             if (line_length > 0 and line[line_length - 1] == '\r') line_length -= 1;
@@ -538,7 +538,7 @@ pub fn readMaskedPasswordFromTerminal(allocator: std.mem.Allocator, user_prompt:
 
         var password_buffer: [1024]u8 = undefined;
         const input_line = try stdin.reader().readUntilDelimiterOrEof(&password_buffer, '\n');
-        try stdout.print("\n", .{});
+        try stdout.print("\n");
         if (input_line) |line| {
             var line_length = line.len;
             if (line_length > 0 and line[line_length - 1] == '\r') line_length -= 1;
@@ -550,8 +550,8 @@ pub fn readMaskedPasswordFromTerminal(allocator: std.mem.Allocator, user_prompt:
 
 test "CLI Parsing Test - Short Forms and Core SSH Options" {
     const testing = std.testing;
-    var args = OperationalConfig.init(testing.allocator);
-    defer args.deinit();
+    var args = OperationalConfig.init(std.testing.allocator);
+    defer args.deinit(std.testing.allocator);
 
     const cli_args = [_][]const u8{
         "-p",          "2222",
@@ -585,7 +585,7 @@ test "CLI Parsing Test - Short Forms and Core SSH Options" {
         "user@myhost", "-extra-ssh-arg",
     };
 
-    try populateConfigFromTokens(testing.allocator, &cli_args, &args);
+    try populateConfigFromTokens(std.testing.allocator, &cli_args, &args);
 
     try testing.expectEqualStrings("2222", args.ssh_port.?);
     try testing.expectEqualStrings("myuser", args.ssh_login.?);
@@ -635,8 +635,8 @@ test "CLI Parsing Test - Short Forms and Core SSH Options" {
 
 test "CLI Parsing Test - Long Forms and Other Options" {
     const testing = std.testing;
-    var args = OperationalConfig.init(testing.allocator);
-    defer args.deinit();
+    var args = OperationalConfig.init(std.testing.allocator);
+    defer args.deinit(std.testing.allocator);
 
     const cli_args = [_][]const u8{
         "++ssh-command",          "et_long",
@@ -668,7 +668,7 @@ test "CLI Parsing Test - Long Forms and Other Options" {
         "++pexpect-disable",      "user@host_long",
     };
 
-    try populateConfigFromTokens(testing.allocator, &cli_args, &args);
+    try populateConfigFromTokens(std.testing.allocator, &cli_args, &args);
 
     try testing.expectEqualStrings("et_long", args.ssh_command.?);
     try testing.expectEqualStrings("secretpass_long", args.password.?);
@@ -741,15 +741,15 @@ test "Destination Parsing Helper Test" {
 
 test "CLI Parsing Test - Unrecognized options and corner cases" {
     const testing = std.testing;
-    var args = OperationalConfig.init(testing.allocator);
-    defer args.deinit();
+    var args = OperationalConfig.init(std.testing.allocator);
+    defer args.deinit(std.testing.allocator);
 
     const cli_args = [_][]const u8{
         "-D", "9090",
         "-z", "user@host",
     };
 
-    try populateConfigFromTokens(testing.allocator, &cli_args, &args);
+    try populateConfigFromTokens(std.testing.allocator, &cli_args, &args);
 
     try testing.expectEqualStrings("user@host", args.destination.?);
     try testing.expectEqual(@as(usize, 3), args.ssh_args.items.len);

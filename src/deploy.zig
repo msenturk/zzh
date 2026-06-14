@@ -2,6 +2,18 @@ const std = @import("std");
 const cli = @import("cli.zig");
 const bundler = @import("bundler.zig");
 const package = @import("package.zig");
+const config = @import("config.zig");
+
+fn pathDeleteFileAbsolute(allocator: std.mem.Allocator, path: []const u8) !void {
+    var temp_io = std.Io.Threaded.init(allocator, .{});
+    defer temp_io.deinit();
+    try std.Io.Dir.deleteFileAbsolute(temp_io.io(), path);
+}
+fn pathDeleteTreeAbsolute(allocator: std.mem.Allocator, path: []const u8) !void {
+    var temp_io = std.Io.Threaded.init(allocator, .{});
+    defer temp_io.deinit();
+    try std.Io.Dir.cwd().deleteTree(temp_io.io(), path);
+}
 
 fn b64Encode(allocator: std.mem.Allocator, raw: []const u8) ![]const u8 {
     const encoder = std.base64.standard.Encoder;
@@ -38,49 +50,49 @@ fn formatEnvVar(allocator: std.mem.Allocator, env_var: []const u8, to_base64: bo
 // Instead, we must close the quote, write an escaped quote (\'), and reopen the quote.
 // E.g., session name "foo'bar" is escaped to "foo'\''bar".
 fn escapeSingleQuotesForShell(allocator: std.mem.Allocator, input_string: []const u8) ![]const u8 {
-    var escaped_builder = std.ArrayList(u8).init(allocator);
-    errdefer escaped_builder.deinit();
+    var escaped_builder = std.ArrayList(u8).empty;
+    errdefer escaped_builder.deinit(allocator);
     for (input_string) |char| {
         if (char == '\'') {
-            try escaped_builder.appendSlice("'\\''");
+            try escaped_builder.appendSlice(allocator, "'\\''");
         } else {
-            try escaped_builder.append(char);
+            try escaped_builder.append(allocator, char);
         }
     }
-    return escaped_builder.toOwnedSlice();
+    return escaped_builder.toOwnedSlice(allocator);
 }
 
 // Shell paths starting with ~ (like ~/.zzh) won't have ~ expanded by the remote shell
 // if we wrap it entirely in single quotes. To bypass this restriction, we leave the ~
 // unquoted and single-quote the rest of the path. E.g., "~/my dir" -> ~'/my dir'.
 fn escapePathForShell(allocator: std.mem.Allocator, raw_path: []const u8) ![]const u8 {
-    var escaped_builder = std.ArrayList(u8).init(allocator);
-    errdefer escaped_builder.deinit();
+    var escaped_builder = std.ArrayList(u8).empty;
+    errdefer escaped_builder.deinit(allocator);
 
     var unquoted_part = raw_path;
     if (std.mem.startsWith(u8, raw_path, "~")) {
         if (std.mem.indexOfScalar(u8, raw_path, '/')) |slash_idx| {
-            try escaped_builder.appendSlice(raw_path[0 .. slash_idx + 1]);
+            try escaped_builder.appendSlice(allocator, raw_path[0 .. slash_idx + 1]);
             unquoted_part = raw_path[slash_idx + 1 ..];
         } else {
-            try escaped_builder.appendSlice(raw_path);
+            try escaped_builder.appendSlice(allocator, raw_path);
             unquoted_part = "";
         }
     }
 
     if (unquoted_part.len > 0) {
-        try escaped_builder.append('\'');
+        try escaped_builder.append(allocator, '\'');
         for (unquoted_part) |char| {
             if (char == '\'') {
-                try escaped_builder.appendSlice("'\\''");
+                try escaped_builder.appendSlice(allocator, "'\\''");
             } else {
-                try escaped_builder.append(char);
+                try escaped_builder.append(allocator, char);
             }
         }
-        try escaped_builder.append('\'');
+        try escaped_builder.append(allocator, '\'');
     }
 
-    return escaped_builder.toOwnedSlice();
+    return escaped_builder.toOwnedSlice(allocator);
 }
 
 pub const StagedScript = struct {
@@ -100,42 +112,42 @@ pub fn compileStagedScript(allocator: std.mem.Allocator, zzh_args: *const cli.Op
     defer allocator.free(escaped_home);
     const shell = zzh_args.shell orelse "zsh";
 
-    var bootstrap_builder = std.ArrayList(u8).init(allocator);
-    errdefer bootstrap_builder.deinit();
+    var bootstrap_builder = std.ArrayList(u8).empty;
+    errdefer bootstrap_builder.deinit(allocator);
 
     // install_force_full deletes the entire ~/.zzh folder.
     // install_force only deletes the staging subdirectory (~/.zzh/.zzh) containing the staged packages,
     // preserving other files in ~/.zzh (like static binaries in ~/.zzh/bin or user profiles).
     if (zzh_args.install_force_full) {
-        try bootstrap_builder.appendSlice("rm -rf ");
-        try bootstrap_builder.appendSlice(escaped_home);
-        try bootstrap_builder.appendSlice(" && ");
+        try bootstrap_builder.appendSlice(allocator, "rm -rf ");
+        try bootstrap_builder.appendSlice(allocator, escaped_home);
+        try bootstrap_builder.appendSlice(allocator, " && ");
     } else if (zzh_args.install_force) {
-        try bootstrap_builder.appendSlice("rm -rf ");
-        try bootstrap_builder.appendSlice(escaped_home);
-        try bootstrap_builder.appendSlice("/.zzh && ");
+        try bootstrap_builder.appendSlice(allocator, "rm -rf ");
+        try bootstrap_builder.appendSlice(allocator, escaped_home);
+        try bootstrap_builder.appendSlice(allocator, "/.zzh && ");
     }
 
-    try bootstrap_builder.appendSlice("mkdir -p ");
-    try bootstrap_builder.appendSlice(escaped_home);
-    try bootstrap_builder.appendSlice(" && tar -xmf - -C ");
-    try bootstrap_builder.appendSlice(escaped_home);
+    try bootstrap_builder.appendSlice(allocator, "mkdir -p ");
+    try bootstrap_builder.appendSlice(allocator, escaped_home);
+    try bootstrap_builder.appendSlice(allocator, " && tar -xmf - -C ");
+    try bootstrap_builder.appendSlice(allocator, escaped_home);
 
-    var session_builder = std.ArrayList(u8).init(allocator);
-    errdefer session_builder.deinit();
+    var session_builder = std.ArrayList(u8).empty;
+    errdefer session_builder.deinit(allocator);
 
-    try session_builder.appendSlice("ln -sf .zzh ");
-    try session_builder.appendSlice(escaped_home);
-    try session_builder.appendSlice("/.xxh && chmod -R +x ");
-    try session_builder.appendSlice(escaped_home);
-    try session_builder.appendSlice(" 2>/dev/null || true && ");
+    try session_builder.appendSlice(allocator, "ln -sf .zzh ");
+    try session_builder.appendSlice(allocator, escaped_home);
+    try session_builder.appendSlice(allocator, "/.xxh && chmod -R +x ");
+    try session_builder.appendSlice(allocator, escaped_home);
+    try session_builder.appendSlice(allocator, " 2>/dev/null || true && ");
 
-    var shell_package_folder = std.ArrayList(u8).init(allocator);
-    defer shell_package_folder.deinit();
+    var shell_package_folder = std.ArrayList(u8).empty;
+    defer shell_package_folder.deinit(allocator);
     if (!std.mem.startsWith(u8, shell, "xxh-shell-")) {
-        try shell_package_folder.appendSlice("xxh-shell-");
+        try shell_package_folder.appendSlice(allocator, "xxh-shell-");
     }
-    try shell_package_folder.appendSlice(shell);
+    try shell_package_folder.appendSlice(allocator, shell);
 
     // If ++tmux, wrap the entrypoint script execution inside a persistent tmux session.
     // This allows the remote session to stay alive if the SSH connection drops.
@@ -143,36 +155,36 @@ pub fn compileStagedScript(allocator: std.mem.Allocator, zzh_args: *const cli.Op
         const session_name = zzh_args.tmux_session orelse "zzh";
         const escaped_session_name = try escapeSingleQuotesForShell(allocator, session_name);
         defer allocator.free(escaped_session_name);
-        try session_builder.appendSlice(escaped_home);
-        try session_builder.appendSlice("/bin/tmux new-session -A -s '");
-        try session_builder.appendSlice(escaped_session_name);
-        try session_builder.appendSlice("' ");
+        try session_builder.appendSlice(allocator, escaped_home);
+        try session_builder.appendSlice(allocator, "/bin/tmux new-session -A -s '");
+        try session_builder.appendSlice(allocator, escaped_session_name);
+        try session_builder.appendSlice(allocator, "' ");
     }
 
     // entrypoint command (quoted for tmux if needed)
-    if (zzh_args.tmux) try session_builder.append('\"');
-    try session_builder.appendSlice(escaped_home);
-    try session_builder.appendSlice("/.zzh/shells/");
-    try session_builder.appendSlice(shell_package_folder.items);
-    try session_builder.appendSlice("/build/entrypoint.sh");
+    if (zzh_args.tmux) try session_builder.append(allocator, '\"');
+    try session_builder.appendSlice(allocator, escaped_home);
+    try session_builder.appendSlice(allocator, "/.zzh/shells/");
+    try session_builder.appendSlice(allocator, shell_package_folder.items);
+    try session_builder.appendSlice(allocator, "/build/entrypoint.sh");
 
     if (zzh_args.host_execute_file) |f| {
-        try session_builder.appendSlice(" -f \"");
-        try session_builder.appendSlice(f);
-        try session_builder.appendSlice("\"");
+        try session_builder.appendSlice(allocator, " -f \"");
+        try session_builder.appendSlice(allocator, f);
+        try session_builder.appendSlice(allocator, "\"");
     }
 
     if (zzh_args.host_execute_command) |hc| {
         const hc_b64 = try b64Encode(allocator, hc);
         defer allocator.free(hc_b64);
-        try session_builder.appendSlice(" -C ");
-        try session_builder.appendSlice(hc_b64);
+        try session_builder.appendSlice(allocator, " -C ");
+        try session_builder.appendSlice(allocator, hc_b64);
     }
 
     if (zzh_args.vverbose) {
-        try session_builder.appendSlice(" -v 2");
+        try session_builder.appendSlice(allocator, " -v 2");
     } else if (zzh_args.verbose) {
-        try session_builder.appendSlice(" -v 1");
+        try session_builder.appendSlice(allocator, " -v 1");
     }
 
     // prepend zzh's bin directory and common system paths to the remote PATH
@@ -182,56 +194,56 @@ pub fn compileStagedScript(allocator: std.mem.Allocator, zzh_args: *const cli.Op
         defer allocator.free(cmd);
         const cmd_b64 = try b64Encode(allocator, cmd);
         defer allocator.free(cmd_b64);
-        try session_builder.appendSlice(" -b ");
-        try session_builder.appendSlice(cmd_b64);
+        try session_builder.appendSlice(allocator, " -b ");
+        try session_builder.appendSlice(allocator, cmd_b64);
     }
 
     for (zzh_args.env.items) |e| {
         const formatted = try formatEnvVar(allocator, e, true);
         defer allocator.free(formatted);
-        try session_builder.appendSlice(" -e ");
-        try session_builder.appendSlice(formatted);
+        try session_builder.appendSlice(allocator, " -e ");
+        try session_builder.appendSlice(allocator, formatted);
     }
     for (zzh_args.envb.items) |e| {
         const formatted = try formatEnvVar(allocator, e, false);
         defer allocator.free(formatted);
-        try session_builder.appendSlice(" -e ");
-        try session_builder.appendSlice(formatted);
+        try session_builder.appendSlice(allocator, " -e ");
+        try session_builder.appendSlice(allocator, formatted);
     }
 
     if (zzh_args.host_home) |h| {
-        try session_builder.appendSlice(" -H ");
-        try session_builder.appendSlice(h);
+        try session_builder.appendSlice(allocator, " -H ");
+        try session_builder.appendSlice(allocator, h);
     } else {
-        try session_builder.appendSlice(" -H ~");
+        try session_builder.appendSlice(allocator, " -H ~");
     }
 
     if (zzh_args.host_home_xdg) |hx| {
-        try session_builder.appendSlice(" -X ");
-        try session_builder.appendSlice(hx);
+        try session_builder.appendSlice(allocator, " -X ");
+        try session_builder.appendSlice(allocator, hx);
     }
 
     for (zzh_args.host_execute_bash.items) |b| {
         const b_b64 = try b64Encode(allocator, b);
         defer allocator.free(b_b64);
-        try session_builder.appendSlice(" -b ");
-        try session_builder.appendSlice(b_b64);
+        try session_builder.appendSlice(allocator, " -b ");
+        try session_builder.appendSlice(allocator, b_b64);
     }
 
     if (zzh_args.dotfiles.items.len > 0) {
-        var basenames = std.ArrayList([]const u8).init(allocator);
-        defer basenames.deinit();
-        var remote_names = std.ArrayList([]const u8).init(allocator);
-        defer remote_names.deinit();
+        var basenames = std.ArrayList([]const u8).empty;
+        defer basenames.deinit(allocator);
+        var remote_names = std.ArrayList([]const u8).empty;
+        defer remote_names.deinit(allocator);
 
         for (zzh_args.dotfiles.items) |d| {
             if (std.mem.indexOfScalar(u8, d, ':')) |colon_idx| {
-                try basenames.append(try allocator.dupe(u8, std.fs.path.basename(d[0..colon_idx])));
-                try remote_names.append(try allocator.dupe(u8, d[colon_idx + 1 ..]));
+                try basenames.append(allocator, try allocator.dupe(u8, std.fs.path.basename(d[0..colon_idx])));
+                try remote_names.append(allocator, try allocator.dupe(u8, d[colon_idx + 1 ..]));
             } else {
                 const base = std.fs.path.basename(d);
-                try basenames.append(try allocator.dupe(u8, base));
-                try remote_names.append(try allocator.dupe(u8, base));
+                try basenames.append(allocator, try allocator.dupe(u8, base));
+                try remote_names.append(allocator, try allocator.dupe(u8, base));
             }
         }
         defer {
@@ -328,14 +340,14 @@ pub fn compileStagedScript(allocator: std.mem.Allocator, zzh_args: *const cli.Op
         defer allocator.free(dotfiles_export);
         const dotfiles_b64 = try b64Encode(allocator, dotfiles_export);
         defer allocator.free(dotfiles_b64);
-        try session_builder.appendSlice(" -b ");
-        try session_builder.appendSlice(dotfiles_b64);
+        try session_builder.appendSlice(allocator, " -b ");
+        try session_builder.appendSlice(allocator, dotfiles_b64);
 
         defer allocator.free(script);
         const b_b64 = try b64Encode(allocator, script);
         defer allocator.free(b_b64);
-        try session_builder.appendSlice(" -b ");
-        try session_builder.appendSlice(b_b64);
+        try session_builder.appendSlice(allocator, " -b ");
+        try session_builder.appendSlice(allocator, b_b64);
 
         const is_bash = std.mem.eql(u8, shell, "bash") or std.mem.eql(u8, shell, "xxh-shell-bash");
         const is_zsh = std.mem.eql(u8, shell, "zsh") or std.mem.eql(u8, shell, "xxh-shell-zsh");
@@ -366,8 +378,8 @@ pub fn compileStagedScript(allocator: std.mem.Allocator, zzh_args: *const cli.Op
             else
                 "shells/xxh-shell-nu/build/config.nu";
 
-            var source_lines = std.ArrayList(u8).init(allocator);
-            defer source_lines.deinit();
+            var source_lines = std.ArrayList(u8).empty;
+            defer source_lines.deinit(allocator);
 
             var nu_basename: ?[]const u8 = null;
             defer {
@@ -387,25 +399,21 @@ pub fn compileStagedScript(allocator: std.mem.Allocator, zzh_args: *const cli.Op
                 for (rc_files) |rc| {
                     if (std.mem.eql(u8, file_only, rc)) {
                         if (is_bash or is_zsh) {
-                            try source_lines.writer().print(
-                                "[ -f ~/{s} ] && . ~/{s}\n",
-                                .{ basename, basename },
-                            );
+                            const formatted = try std.fmt.allocPrint(allocator, "[ -f ~/{s} ] && . ~/{s}\n", .{ basename, basename });
+                            defer allocator.free(formatted);
+                            try source_lines.appendSlice(allocator, formatted);
                         } else if (is_fish) {
-                            try source_lines.writer().print(
-                                "if test -f ~/{s}; source ~/{s}; end\n",
-                                .{ basename, basename },
-                            );
+                            const formatted = try std.fmt.allocPrint(allocator, "if test -f ~/{s}; source ~/{s}; end\n", .{ basename, basename });
+                            defer allocator.free(formatted);
+                            try source_lines.appendSlice(allocator, formatted);
                         } else if (is_xonsh) {
-                            try source_lines.writer().print(
-                                "import os; _rc = os.path.expanduser('~/{s}'); os.path.exists(_rc) and exec(open(_rc).read())\n",
-                                .{basename},
-                            );
+                            const formatted = try std.fmt.allocPrint(allocator, "import os; _rc = os.path.expanduser('~/{s}'); os.path.exists(_rc) and exec(open(_rc).read())\n", .{basename});
+                            defer allocator.free(formatted);
+                            try source_lines.appendSlice(allocator, formatted);
                         } else if (is_nu) {
-                            try source_lines.writer().print(
-                                "source \"~/{s}\"\n",
-                                .{basename},
-                            );
+                            const formatted = try std.fmt.allocPrint(allocator, "source \"~/{s}\"\n", .{basename});
+                            defer allocator.free(formatted);
+                            try source_lines.appendSlice(allocator, formatted);
                             if (nu_basename == null) {
                                 nu_basename = try allocator.dupe(u8, basename);
                             }
@@ -442,19 +450,19 @@ pub fn compileStagedScript(allocator: std.mem.Allocator, zzh_args: *const cli.Op
                 defer allocator.free(inject);
                 const inject_b64 = try b64Encode(allocator, inject);
                 defer allocator.free(inject_b64);
-                try session_builder.appendSlice(" -b ");
-                try session_builder.appendSlice(inject_b64);
+                try session_builder.appendSlice(allocator, " -b ");
+                try session_builder.appendSlice(allocator, inject_b64);
             }
         }
     }
 
     if (zzh_args.tmux) {
-        try session_builder.append('\"');
+        try session_builder.append(allocator, '\"');
     }
 
     return StagedScript{
-        .bootstrap_script = try bootstrap_builder.toOwnedSlice(),
-        .session_script = try session_builder.toOwnedSlice(),
+        .bootstrap_script = try bootstrap_builder.toOwnedSlice(allocator),
+        .session_script = try session_builder.toOwnedSlice(allocator),
     };
 }
 
@@ -491,11 +499,11 @@ pub fn getDeploymentHash(allocator: std.mem.Allocator, zzh_args: *const cli.Oper
     }
     var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
     hasher.final(&digest);
-    return std.fmt.allocPrint(allocator, "{s}", .{std.fmt.fmtSliceHexLower(&digest)});
+    return std.fmt.allocPrint(allocator, "{s}", .{std.fmt.bytesToHex(digest, .lower)});
 }
 
-pub fn checkPasswordless(allocator: std.mem.Allocator, zzh_args: *const cli.OperationalConfig) !bool {
-    var argv = std.ArrayList([]const u8).init(allocator);
+pub fn checkPasswordless(allocator: std.mem.Allocator, zzh_args: *const cli.OperationalConfig, io: std.Io) !bool {
+    var argv = std.ArrayList([]const u8).empty;
     defer {
         for (argv.items) |item| {
             allocator.free(item);
@@ -542,92 +550,93 @@ pub fn checkPasswordless(allocator: std.mem.Allocator, zzh_args: *const cli.Oper
     try argv.append(try allocator.dupe(u8, "exit"));
     try argv.append(try allocator.dupe(u8, "0"));
 
-    var child = std.process.Child.init(argv.items, allocator);
-    child.stdin_behavior = .Ignore;
-    child.stdout_behavior = .Ignore;
-    child.stderr_behavior = .Ignore;
-
-    const term = try child.spawnAndWait();
+    var child = try std.process.spawn(io, .{
+        .argv = argv.items,
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+    });
+    const term = try child.wait(io);
     return switch (term) {
-        .Exited => |exit_code| exit_code == 0,
+        .exited => |exit_code| exit_code == 0,
         else => false,
     };
 }
 
 pub fn buildSshBoilerplate(allocator: std.mem.Allocator, zzh_args: *const cli.OperationalConfig) !std.ArrayList([]const u8) {
-    var ssh_boilerplate = std.ArrayList([]const u8).init(allocator);
+    var ssh_boilerplate = std.ArrayList([]const u8).empty;
     errdefer {
         for (ssh_boilerplate.items) |item| {
             allocator.free(item);
         }
-        ssh_boilerplate.deinit();
+        ssh_boilerplate.deinit(allocator);
     }
 
     const ssh_cmd = zzh_args.ssh_command orelse "ssh";
-    try ssh_boilerplate.append(try allocator.dupe(u8, ssh_cmd));
+    try ssh_boilerplate.append(allocator, try allocator.dupe(u8, ssh_cmd));
 
-    try ssh_boilerplate.append(try allocator.dupe(u8, "-C")); // Enable SSH native compression to speed up transfer without local CPU bottleneck
-    try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
-    try ssh_boilerplate.append(try allocator.dupe(u8, "StrictHostKeyChecking=accept-new"));
+    try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "-C")); // Enable SSH native compression to speed up transfer without local CPU bottleneck
+    try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "-o"));
+    try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "StrictHostKeyChecking=accept-new"));
 
     // Prevent 20-30s delay on Windows due to GSSAPI timeout
-    try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
-    try ssh_boilerplate.append(try allocator.dupe(u8, "GSSAPIAuthentication=no"));
+    try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "-o"));
+    try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "GSSAPIAuthentication=no"));
 
     if (!zzh_args.verbose and !zzh_args.vverbose) {
-        try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
-        try ssh_boilerplate.append(try allocator.dupe(u8, "LogLevel=QUIET"));
+        try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "-o"));
+        try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "LogLevel=QUIET"));
     }
 
     if (zzh_args.ssh_port) |p| {
-        try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
+        try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "-o"));
         const opt = try std.fmt.allocPrint(allocator, "Port={s}", .{p});
-        try ssh_boilerplate.append(opt);
+        try ssh_boilerplate.append(allocator, opt);
     }
 
     if (zzh_args.ssh_private_key) |k| {
-        try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
+        try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "-o"));
         const opt = try std.fmt.allocPrint(allocator, "IdentityFile={s}", .{k});
-        try ssh_boilerplate.append(opt);
+        try ssh_boilerplate.append(allocator, opt);
     }
 
     if (zzh_args.ssh_login) |l| {
-        try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
+        try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "-o"));
         const opt = try std.fmt.allocPrint(allocator, "User={s}", .{l});
-        try ssh_boilerplate.append(opt);
+        try ssh_boilerplate.append(allocator, opt);
     } else if (zzh_args.destination) |dest| {
         const dest_info = cli.parseConnectionEndpoint(dest);
         if (dest_info.user) |u| {
-            try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
+            try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "-o"));
             const opt = try std.fmt.allocPrint(allocator, "User={s}", .{u});
-            try ssh_boilerplate.append(opt);
+            try ssh_boilerplate.append(allocator, opt);
         }
     }
 
     if (zzh_args.ssh_jump_host) |j| {
-        try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
+        try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "-o"));
         const opt = try std.fmt.allocPrint(allocator, "ProxyJump={s}", .{j});
-        try ssh_boilerplate.append(opt);
+        try ssh_boilerplate.append(allocator, opt);
     }
 
     for (zzh_args.ssh_options.items) |o| {
-        try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
-        try ssh_boilerplate.append(try allocator.dupe(u8, o));
+        try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "-o"));
+        try ssh_boilerplate.append(allocator, try allocator.dupe(u8, o));
     }
 
     // Reuse existing SSH multiplexed connection to avoid doing authentication handshake twice (which can take 1-2s).
     const builtin = @import("builtin");
     if (builtin.os.tag != .windows) {
-        try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
-        try ssh_boilerplate.append(try allocator.dupe(u8, "ControlMaster=auto"));
-        try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
-        try ssh_boilerplate.append(try allocator.dupe(u8, "ControlPath=/tmp/zzh_mux_%h_%p_%r"));
-        try ssh_boilerplate.append(try allocator.dupe(u8, "-o"));
-        try ssh_boilerplate.append(try allocator.dupe(u8, "ControlPersist=5m"));
+        try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "-o"));
+        try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "ControlMaster=auto"));
+        try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "-o"));
+        try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "ControlPath=/tmp/zzh_mux_%h_%p_%r"));
+        try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "-o"));
+        try ssh_boilerplate.append(allocator, try allocator.dupe(u8, "ControlPersist=5m"));
     }
 
     for (zzh_args.ssh_args.items) |arg| {
-        try ssh_boilerplate.append(try allocator.dupe(u8, arg));
+        try ssh_boilerplate.append(allocator, try allocator.dupe(u8, arg));
     }
 
     return ssh_boilerplate;
@@ -669,6 +678,7 @@ pub fn deployAndConnect(
     zzh_args: *const cli.OperationalConfig,
     shell_path: []const u8,
     plugin_paths: []const []const u8,
+    io: std.Io,
 ) !void {
     const builtin = @import("builtin");
     const staged_script = try compileStagedScript(allocator, zzh_args);
@@ -689,10 +699,10 @@ pub fn deployAndConnect(
         for (ssh_boilerplate.items) |item| {
             allocator.free(item);
         }
-        ssh_boilerplate.deinit();
+        ssh_boilerplate.deinit(allocator);
     }
 
-    var env_map = try std.process.getEnvMap(allocator);
+    var env_map = try config.global_environ.createMap(allocator);
     defer env_map.deinit();
 
     var exe_path: ?[]const u8 = null;
@@ -701,7 +711,7 @@ pub fn deployAndConnect(
     }
 
     if (zzh_args.password) |pwd| {
-        exe_path = std.fs.selfExePathAlloc(allocator) catch null;
+        exe_path = std.process.executablePathAlloc(io, allocator) catch null;
         if (exe_path) |p| {
             try env_map.put("SSH_ASKPASS", p);
             try env_map.put("SSH_ASKPASS_REQUIRE", "force");
@@ -726,32 +736,32 @@ pub fn deployAndConnect(
     }
 
     {
-        var check_runner_args = std.ArrayList([]const u8).init(allocator);
+        var check_runner_args = std.ArrayList([]const u8).empty;
         defer {
             for (check_runner_args.items) |arg| {
                 allocator.free(arg);
             }
-            check_runner_args.deinit();
+            check_runner_args.deinit(allocator);
         }
 
         if (zzh_args.password != null and exe_path != null and builtin.os.tag != .windows) {
-            try check_runner_args.append(try allocator.dupe(u8, exe_path.?));
-            try check_runner_args.append(try allocator.dupe(u8, "--internal-setsid"));
+            try check_runner_args.append(allocator, try allocator.dupe(u8, exe_path.?));
+            try check_runner_args.append(allocator, try allocator.dupe(u8, "--internal-setsid"));
         }
 
         for (ssh_boilerplate.items) |arg| {
-            try check_runner_args.append(try allocator.dupe(u8, arg));
+            try check_runner_args.append(allocator, try allocator.dupe(u8, arg));
         }
 
         if (zzh_args.destination) |dest| {
             const dest_info = cli.parseConnectionEndpoint(dest);
-            try check_runner_args.append(try allocator.dupe(u8, dest_info.host));
+            try check_runner_args.append(allocator, try allocator.dupe(u8, dest_info.host));
         }
 
         const detect_cmd = "echo ZZH_TARGET_START && uname -s && uname -m && echo ZZH_TARGET_END || echo ZZH_TARGET_END";
         const check_cmd = try std.fmt.allocPrint(allocator, "{s}; cat ~/.zzh/.payload_hash 2>/dev/null || echo ZZH_NO_HASH", .{detect_cmd});
         defer allocator.free(check_cmd);
-        try check_runner_args.append(try allocator.dupe(u8, check_cmd));
+        try check_runner_args.append(allocator, try allocator.dupe(u8, check_cmd));
 
         if (zzh_args.verbose or zzh_args.vverbose) {
             std.debug.print("Checking remote target and payload hash with command:", .{});
@@ -763,26 +773,25 @@ pub fn deployAndConnect(
             std.debug.print("      - Detecting remote host system architecture...\n", .{});
         }
 
-        var child = std.process.Child.init(check_runner_args.items, allocator);
-        child.env_map = &env_map;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Inherit;
+        var child = try std.process.spawn(io, .{
+            .argv = check_runner_args.items,
+            .environ_map = &env_map,
+            .stdout = .pipe,
+            .stderr = .inherit,
+        });
 
-        try child.spawn();
+        var out_buf = std.ArrayList(u8).empty;
+        defer out_buf.deinit(allocator);
 
-        var out_buf = std.ArrayList(u8).init(allocator);
-        defer out_buf.deinit();
-
-        var stdout_reader = child.stdout.?.reader();
         while (true) {
             var buf: [1024]u8 = undefined;
-            const amt = try stdout_reader.read(&buf);
+            const amt = child.stdout.?.readStreaming(io, &.{&buf}) catch |err| switch(err) { error.EndOfStream => break, else => return err };
             if (amt == 0) break;
-            try out_buf.appendSlice(buf[0..amt]);
+            try out_buf.appendSlice(allocator, buf[0..amt]);
         }
 
-        const term = try child.wait();
-        if (term != .Exited or term.Exited != 0) {
+        const term = try child.wait(io);
+        if (term != .exited or term.exited != 0) {
             if (zzh_args.verbose or zzh_args.vverbose) {
                 std.debug.print("Remote target check failed with exit code or signal. Output: {s}\n", .{out_buf.items});
             }
@@ -878,27 +887,27 @@ pub fn deployAndConnect(
         const bootstrap_cmd = try std.fmt.allocPrint(allocator, "{s}{s} && echo \"{s}\" > {s}/.payload_hash", .{ env_prefix, staged_script.bootstrap_script, local_hash, escaped_target_dir });
         defer allocator.free(bootstrap_cmd);
 
-        var bootstrap_runner_args = std.ArrayList([]const u8).init(allocator);
+        var bootstrap_runner_args = std.ArrayList([]const u8).empty;
         defer {
             for (bootstrap_runner_args.items) |arg| {
                 allocator.free(arg);
             }
-            bootstrap_runner_args.deinit();
+            bootstrap_runner_args.deinit(allocator);
         }
 
         if (zzh_args.password != null and exe_path != null and builtin.os.tag != .windows) {
-            try bootstrap_runner_args.append(try allocator.dupe(u8, exe_path.?));
-            try bootstrap_runner_args.append(try allocator.dupe(u8, "--internal-setsid"));
+            try bootstrap_runner_args.append(allocator, try allocator.dupe(u8, exe_path.?));
+            try bootstrap_runner_args.append(allocator, try allocator.dupe(u8, "--internal-setsid"));
         }
 
         for (ssh_boilerplate.items) |arg| {
-            try bootstrap_runner_args.append(try allocator.dupe(u8, arg));
+            try bootstrap_runner_args.append(allocator, try allocator.dupe(u8, arg));
         }
         if (zzh_args.destination) |dest| {
             const dest_info = cli.parseConnectionEndpoint(dest);
-            try bootstrap_runner_args.append(try allocator.dupe(u8, dest_info.host));
+            try bootstrap_runner_args.append(allocator, try allocator.dupe(u8, dest_info.host));
         }
-        try bootstrap_runner_args.append(try allocator.dupe(u8, bootstrap_cmd));
+        try bootstrap_runner_args.append(allocator, try allocator.dupe(u8, bootstrap_cmd));
 
         if (zzh_args.verbose or zzh_args.vverbose) {
             std.debug.print("Deploying payload with command:", .{});
@@ -910,22 +919,27 @@ pub fn deployAndConnect(
             std.debug.print("[4/4] Deploying to remote...\n", .{});
         }
 
-        var child = std.process.Child.init(bootstrap_runner_args.items, allocator);
-        child.env_map = &env_map;
-        child.stdin_behavior = .Pipe;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Inherit;
+        var temp_io_deploy = std.Io.Threaded.init(allocator, .{});
+        defer temp_io_deploy.deinit();
 
-        const deploy_start_time = std.time.milliTimestamp();
-        try child.spawn();
+        
+        var child = try std.process.spawn(temp_io_deploy.io(), .{
+            .argv = bootstrap_runner_args.items,
+            .environ_map = &env_map,
+            .stdin = .pipe,
+            .stdout = .pipe,
+            .stderr = .inherit,
+        });
 
         const PayloadThread = struct {
-            fn run(path: []const u8, stdin_file: std.fs.File) void {
-                defer stdin_file.close();
-                var archive_file = std.fs.openFileAbsolute(path, .{}) catch return;
-                defer archive_file.close();
+            fn run(path: []const u8, stdin_file: std.Io.File) void {
+                var th_io = std.Io.Threaded.init(std.heap.page_allocator, .{});
+                defer th_io.deinit();
+                defer stdin_file.close(th_io.io());
+                var archive_file = std.Io.Dir.openFileAbsolute(th_io.io(), path, .{}) catch return;
+                defer archive_file.close(th_io.io());
 
-                const file_stat = archive_file.stat() catch return;
+                const file_stat = archive_file.stat(th_io.io()) catch return;
                 const total_size = file_stat.size;
                 var uploaded_size: u64 = 0;
                 var last_percent: u64 = 200;
@@ -933,9 +947,9 @@ pub fn deployAndConnect(
 
                 var buf: [32768]u8 = undefined;
                 while (true) {
-                    const amt = archive_file.read(&buf) catch break;
+                    const amt = archive_file.readStreaming(th_io.io(), &.{&buf}) catch break;
                     if (amt == 0) break;
-                    stdin_file.writeAll(buf[0..amt]) catch break;
+                    stdin_file.writeStreamingAll(th_io.io(), buf[0..amt]) catch break;
                     uploaded_size += amt;
 
                     if (uploaded_size > 128 * 1024 or uploaded_size == total_size) {
@@ -960,14 +974,11 @@ pub fn deployAndConnect(
         var thread = try std.Thread.spawn(.{}, PayloadThread.run, .{ opt_bundle.?.tarball_output_path, child.stdin.? });
 
         // Forward stdout from remote
-        var stdout_reader = child.stdout.?.reader();
+        var buf_out: [65536]u8 = undefined;
         while (true) {
-            const line = stdout_reader.readUntilDelimiterAlloc(allocator, '\n', 65536) catch |err| switch (err) {
-                error.EndOfStream => break,
-                else => break,
-            };
-            defer allocator.free(line);
-            std.io.getStdOut().writer().print("{s}\n", .{line}) catch {};
+            const amt = child.stdout.?.readStreaming(temp_io_deploy.io(), &.{&buf_out}) catch |err| switch(err) { error.EndOfStream => break, else => break };
+            if (amt == 0) break;
+            std.debug.print("{s}", .{buf_out[0..amt]});
         }
 
         thread.join();
@@ -975,26 +986,25 @@ pub fn deployAndConnect(
             std.debug.print("      - Unpacking archive...\n", .{});
         }
 
-        const term = try child.wait();
+        const term = try std.process.Child.wait(&child, temp_io_deploy.io());
 
-        const elapsed_deploy = std.time.milliTimestamp() - deploy_start_time;
         if (zzh_args.time) {
-            std.debug.print("=> SSH deployment finished in {d} ms\n", .{elapsed_deploy});
+            std.debug.print("=> SSH deployment finished\n", .{});
         }
 
         switch (term) {
-            .Exited => |code| {
+            .exited => |code| {
                 if (code != 0) {
                     if (code != 255) {
                         std.debug.print("Payload deployment failed with exit code: {}\n", .{code});
-                        std.fs.deleteFileAbsolute(opt_bundle.?.tarball_output_path) catch {};
+                        pathDeleteFileAbsolute(allocator, opt_bundle.?.tarball_output_path) catch {};
                         return error.DeploymentFailed;
                     }
                 }
             },
             else => {
                 std.debug.print("Payload deployment terminated unexpectedly\n", .{});
-                std.fs.deleteFileAbsolute(opt_bundle.?.tarball_output_path) catch {};
+                pathDeleteFileAbsolute(allocator, opt_bundle.?.tarball_output_path) catch {};
                 return error.DeploymentTerminated;
             },
         }
@@ -1005,22 +1015,22 @@ pub fn deployAndConnect(
     }
 
     // Launch the interactive session over SSH.
-    var interactive_session_args = std.ArrayList([]const u8).init(allocator);
-    defer interactive_session_args.deinit();
+    var interactive_session_args = std.ArrayList([]const u8).empty;
+    defer interactive_session_args.deinit(allocator);
     for (ssh_boilerplate.items) |arg| {
-        try interactive_session_args.append(arg);
+        try interactive_session_args.append(allocator, arg);
     }
     // -t is required to allocate a pseudo-terminal for interactive shells
     if (zzh_args.tmux) {
-        try interactive_session_args.append("-tt");
+        try interactive_session_args.append(allocator, "-tt");
     } else if (zzh_args.host_execute_command == null and zzh_args.host_execute_file == null) {
-        try interactive_session_args.append("-t");
+        try interactive_session_args.append(allocator, "-t");
     }
     if (zzh_args.destination) |dest| {
         const dest_info = cli.parseConnectionEndpoint(dest);
-        try interactive_session_args.append(dest_info.host);
+        try interactive_session_args.append(allocator, dest_info.host);
     }
-    try interactive_session_args.append(session_cmd);
+    try interactive_session_args.append(allocator, session_cmd);
 
     if (zzh_args.verbose or zzh_args.vverbose) {
         std.debug.print("Connecting with command:", .{});
@@ -1037,15 +1047,15 @@ pub fn deployAndConnect(
         }
     }
 
-    var child = std.process.Child.init(interactive_session_args.items, allocator);
-    child.env_map = &env_map;
-    child.stdin_behavior = .Inherit;
-    child.stdout_behavior = .Inherit;
-    child.stderr_behavior = .Inherit;
+    var child = try std.process.spawn(io, .{
+        .argv = interactive_session_args.items,
+        .environ_map = &env_map,
+        .stdin = .inherit,
+        .stdout = .inherit,
+        .stderr = .inherit,
+    });
 
-    try child.spawn();
-
-    const term = try child.wait();
+    const term = try child.wait(io);
 
     // Perform client-side remote directory cleanup if requested by the user.
     if (zzh_args.host_zzh_home_remove) {
@@ -1055,22 +1065,22 @@ pub fn deployAndConnect(
         const clean_cmd = try std.fmt.allocPrint(allocator, "rm -rf {s}", .{escaped_home});
         defer allocator.free(clean_cmd);
 
-        var cleanup_runner_args = std.ArrayList([]const u8).init(allocator);
-        defer cleanup_runner_args.deinit();
+        var cleanup_runner_args = std.ArrayList([]const u8).empty;
+        defer cleanup_runner_args.deinit(allocator);
 
         if (zzh_args.password != null and exe_path != null and builtin.os.tag != .windows) {
-            try cleanup_runner_args.append(exe_path.?);
-            try cleanup_runner_args.append("--internal-setsid");
+            try cleanup_runner_args.append(allocator, exe_path.?);
+            try cleanup_runner_args.append(allocator, "--internal-setsid");
         }
 
         for (ssh_boilerplate.items) |arg| {
-            try cleanup_runner_args.append(arg);
+            try cleanup_runner_args.append(allocator, arg);
         }
         if (zzh_args.destination) |dest| {
             const dest_info = cli.parseConnectionEndpoint(dest);
-            try cleanup_runner_args.append(dest_info.host);
+            try cleanup_runner_args.append(allocator, dest_info.host);
         }
-        try cleanup_runner_args.append(clean_cmd);
+        try cleanup_runner_args.append(allocator, clean_cmd);
 
         if (zzh_args.verbose or zzh_args.vverbose) {
             std.debug.print("Cleaning up remote home directory with command:", .{});
@@ -1080,17 +1090,20 @@ pub fn deployAndConnect(
             std.debug.print("\n", .{});
         }
 
-        var clean_child = std.process.Child.init(cleanup_runner_args.items, allocator);
-        clean_child.env_map = &env_map;
-        clean_child.stdin_behavior = .Ignore;
-        clean_child.stdout_behavior = .Ignore;
-        clean_child.stderr_behavior = .Ignore;
-
-        _ = clean_child.spawnAndWait() catch {};
+        if (std.process.spawn(io, .{
+            .argv = cleanup_runner_args.items,
+            .environ_map = &env_map,
+            .stdin = .ignore,
+            .stdout = .ignore,
+            .stderr = .ignore,
+        })) |spawned_cc| {
+            var cc = spawned_cc;
+            _ = std.process.Child.wait(&cc, io) catch {};
+        } else |_| {}
     }
 
     switch (term) {
-        .Exited => |code| {
+        .exited => |code| {
             if (code != 0) {
                 std.debug.print("SSH exited with code: {}\n", .{code});
             }
@@ -1102,36 +1115,36 @@ pub fn deployAndConnect(
 }
 
 test "Remote Command Builder Test" {
-    const testing = std.testing;
+    
 
-    var args = cli.OperationalConfig.init(testing.allocator);
-    defer args.deinit();
+    var args = cli.OperationalConfig.init(std.testing.allocator);
+    defer args.deinit(std.testing.allocator);
 
-    args.shell = try testing.allocator.dupe(u8, "zsh");
-    try args.env.append(try testing.allocator.dupe(u8, "VAR1=VAL1"));
+    args.shell = try std.testing.allocator.dupe(u8, "zsh");
+    try args.env.append(std.testing.allocator, try std.testing.allocator.dupe(u8, "VAR1=VAL1"));
     args.verbose = true;
 
     // Test OOM path to cover errdefer
-    _ = compileStagedScript(testing.failing_allocator, &args) catch |err| {
-        try testing.expect(err == error.OutOfMemory);
+    _ = compileStagedScript(std.testing.failing_allocator, &args) catch |err| {
+        try std.testing.expect(err == error.OutOfMemory);
     };
 
-    const staged_script = try compileStagedScript(testing.allocator, &args);
-    defer staged_script.deinit(testing.allocator);
-    const cmd = try std.mem.join(testing.allocator, " && ", &.{ staged_script.bootstrap_script, staged_script.session_script });
-    defer testing.allocator.free(cmd);
+    const staged_script = try compileStagedScript(std.testing.allocator, &args);
+    defer staged_script.deinit(std.testing.allocator);
+    const cmd = try std.mem.join(std.testing.allocator, " && ", &.{ staged_script.bootstrap_script, staged_script.session_script });
+    defer std.testing.allocator.free(cmd);
 
-    try testing.expectEqualStrings("mkdir -p ~/'.zzh' && tar -xmf - -C ~/'.zzh' && ln -sf .zzh ~/'.zzh'/.xxh && chmod -R +x ~/'.zzh' 2>/dev/null || true && ~/'.zzh'/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -b ZXhwb3J0IFpaSF9IT01FPSd+Ly56emgnOyBleHBvcnQgWFhIX0hPTUU9J34vLnp6aCc7IGV4cG9ydCBQQVRIPSJ+Ly56emgvYmluOi91c3IvbG9jYWwvc2JpbjovdXNyL2xvY2FsL2JpbjovdXNyL3NiaW46L3Vzci9iaW46L3NiaW46L2JpbjokUEFUSCI= -e VAR1=VkFMMQ== -H ~", cmd);
+    try std.testing.expectEqualStrings("mkdir -p ~/'.zzh' && tar -xmf - -C ~/'.zzh' && ln -sf .zzh ~/'.zzh'/.xxh && chmod -R +x ~/'.zzh' 2>/dev/null || true && ~/'.zzh'/.zzh/shells/xxh-shell-zsh/build/entrypoint.sh -v 1 -b ZXhwb3J0IFpaSF9IT01FPSd+Ly56emgnOyBleHBvcnQgWFhIX0hPTUU9J34vLnp6aCc7IGV4cG9ydCBQQVRIPSJ+Ly56emgvYmluOi91c3IvbG9jYWwvc2JpbjovdXNyL2xvY2FsL2JpbjovdXNyL3NiaW46L3Vzci9iaW46L3NiaW46L2JpbjokUEFUSCI= -e VAR1=VkFMMQ== -H ~", cmd);
 }
 
 test "Remote Command Builder Test - Comprehensive" {
-    const testing = std.testing;
+    
 
-    var args = cli.OperationalConfig.init(testing.allocator);
-    defer args.deinit();
+    var args = cli.OperationalConfig.init(std.testing.allocator);
+    defer args.deinit(std.testing.allocator);
 
-    args.shell = try testing.allocator.dupe(u8, "bash");
-    args.host_zzh_home = try testing.allocator.dupe(u8, "/custom/home");
+    args.shell = try std.testing.allocator.dupe(u8, "bash");
+    args.host_zzh_home = try std.testing.allocator.dupe(u8, "/custom/home");
 
     // Flags
     args.install_force_full = true;
@@ -1139,58 +1152,60 @@ test "Remote Command Builder Test - Comprehensive" {
     args.vverbose = true;
 
     // Command and File execution
-    args.host_execute_file = try testing.allocator.dupe(u8, "script.sh");
-    args.host_execute_command = try testing.allocator.dupe(u8, "echo hello");
+    args.host_execute_file = try std.testing.allocator.dupe(u8, "script.sh");
+    args.host_execute_command = try std.testing.allocator.dupe(u8, "echo hello");
 
     // Env vars with and without quotes, and without =
-    try args.env.append(try testing.allocator.dupe(u8, "VAR1=\"VAL1\""));
-    try args.env.append(try testing.allocator.dupe(u8, "VAR2='VAL2'"));
-    try args.env.append(try testing.allocator.dupe(u8, "VAR_NO_VAL"));
+    try args.env.append(std.testing.allocator, try std.testing.allocator.dupe(u8, "VAR1=\"VAL1\""));
+    try args.env.append(std.testing.allocator, try std.testing.allocator.dupe(u8, "VAR2='VAL2'"));
+    try args.env.append(std.testing.allocator, try std.testing.allocator.dupe(u8, "VAR_NO_VAL"));
 
     // Raw envb (to_base64 is false)
-    try args.envb.append(try testing.allocator.dupe(u8, "B64VAR1=VAL1"));
-    try args.envb.append(try testing.allocator.dupe(u8, "B64VAR_NO_VAL"));
+    try args.envb.append(std.testing.allocator, try std.testing.allocator.dupe(u8, "B64VAR1=VAL1"));
+    try args.envb.append(std.testing.allocator, try std.testing.allocator.dupe(u8, "B64VAR_NO_VAL"));
 
     // Host homes
-    args.host_home = try testing.allocator.dupe(u8, "/host/home");
-    args.host_home_xdg = try testing.allocator.dupe(u8, "/xdg/config");
+    args.host_home = try std.testing.allocator.dupe(u8, "/host/home");
+    args.host_home_xdg = try std.testing.allocator.dupe(u8, "/xdg/config");
 
     // Execute bash
-    try args.host_execute_bash.append(try testing.allocator.dupe(u8, "bash_cmd"));
+    try args.host_execute_bash.append(std.testing.allocator, try std.testing.allocator.dupe(u8, "bash_cmd"));
 
     // Dotfiles (one to source, one not to source)
-    try args.dotfiles.append(try testing.allocator.dupe(u8, "~/.bashrc"));
-    try args.dotfiles.append(try testing.allocator.dupe(u8, "~/.tmux.conf"));
+    try args.dotfiles.append(std.testing.allocator, try std.testing.allocator.dupe(u8, "~/.bashrc"));
+    try args.dotfiles.append(std.testing.allocator, try std.testing.allocator.dupe(u8, "~/.tmux.conf"));
 
-    const staged_script = try compileStagedScript(testing.allocator, &args);
-    defer staged_script.deinit(testing.allocator);
-    const cmd = try std.mem.join(testing.allocator, " && ", &.{ staged_script.bootstrap_script, staged_script.session_script });
-    defer testing.allocator.free(cmd);
+    const staged_script = try compileStagedScript(std.testing.allocator, &args);
+    defer staged_script.deinit(std.testing.allocator);
+    const cmd = try std.mem.join(std.testing.allocator, " && ", &.{ staged_script.bootstrap_script, staged_script.session_script });
+    defer std.testing.allocator.free(cmd);
 
     // Verify commands inside cmd
-    try testing.expect(std.mem.indexOf(u8, cmd, "rm -rf '/custom/home' &&") != null);
-    try testing.expect(std.mem.indexOf(u8, cmd, "mkdir -p '/custom/home' && tar -xmf - -C '/custom/home' && ln -sf .zzh '/custom/home'/.xxh && chmod -R +x '/custom/home'") != null);
-    try testing.expect(std.mem.indexOf(u8, cmd, " -b ZXhwb3J0IFpaSF9IT01F") != null);
-    try testing.expect(std.mem.indexOf(u8, cmd, " -f \"script.sh\"") != null);
-    try testing.expect(std.mem.indexOf(u8, cmd, " -C ZWNobyBoZWxsbw==") != null); // base64 of "echo hello"
-    try testing.expect(std.mem.indexOf(u8, cmd, " -v 2") != null);
-    try testing.expect(std.mem.indexOf(u8, cmd, " -e VAR1=VkFMMQ==") != null); // base64 of "VAL1" (quotes trimmed)
-    try testing.expect(std.mem.indexOf(u8, cmd, " -e VAR2=VkFMMg==") != null); // base64 of "VAL2" (quotes trimmed)
-    try testing.expect(std.mem.indexOf(u8, cmd, " -e VAR_NO_VAL") != null);
-    try testing.expect(std.mem.indexOf(u8, cmd, " -e B64VAR1=VAL1") != null);
-    try testing.expect(std.mem.indexOf(u8, cmd, " -e B64VAR_NO_VAL") != null);
-    try testing.expect(std.mem.indexOf(u8, cmd, " -H /host/home") != null);
-    try testing.expect(std.mem.indexOf(u8, cmd, " -X /xdg/config") != null);
-    try testing.expect(std.mem.indexOf(u8, cmd, " -b YmFzaF9jbWQ=") != null); // base64 of "bash_cmd"
+    try std.testing.expect(std.mem.indexOf(u8, cmd, "rm -rf '/custom/home' &&") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmd, "mkdir -p '/custom/home' && tar -xmf - -C '/custom/home' && ln -sf .zzh '/custom/home'/.xxh && chmod -R +x '/custom/home'") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmd, " -b ZXhwb3J0IFpaSF9IT01F") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmd, " -f \"script.sh\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmd, " -C ZWNobyBoZWxsbw==") != null); // base64 of "echo hello"
+    try std.testing.expect(std.mem.indexOf(u8, cmd, " -v 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmd, " -e VAR1=VkFMMQ==") != null); // base64 of "VAL1" (quotes trimmed)
+    try std.testing.expect(std.mem.indexOf(u8, cmd, " -e VAR2=VkFMMg==") != null); // base64 of "VAL2" (quotes trimmed)
+    try std.testing.expect(std.mem.indexOf(u8, cmd, " -e VAR_NO_VAL") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmd, " -e B64VAR1=VAL1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmd, " -e B64VAR_NO_VAL") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmd, " -H /host/home") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmd, " -X /xdg/config") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmd, " -b YmFzaF9jbWQ=") != null); // base64 of "bash_cmd"
 
     // Verify dotfiles directory export
     const expected_export = "export ZZH_DOTFILES_DIR=\"/custom/home/.zzh/dotfiles\";";
-    const expected_export_b64 = try b64Encode(testing.allocator, expected_export);
-    defer testing.allocator.free(expected_export_b64);
-    var expected_buf = std.ArrayList(u8).init(testing.allocator);
-    defer expected_buf.deinit();
-    try expected_buf.writer().print(" -b {s}", .{expected_export_b64});
-    try testing.expect(std.mem.indexOf(u8, cmd, expected_buf.items) != null);
+    const expected_export_b64 = try b64Encode(std.testing.allocator, expected_export);
+    defer std.testing.allocator.free(expected_export_b64);
+    var expected_buf = std.ArrayList(u8).empty;
+    defer expected_buf.deinit(std.testing.allocator);
+    const f_buf = try std.fmt.allocPrint(std.testing.allocator, " -b {s}", .{expected_export_b64});
+    defer std.testing.allocator.free(f_buf);
+    try expected_buf.appendSlice(std.testing.allocator, f_buf);
+    try std.testing.expect(std.mem.indexOf(u8, cmd, expected_buf.items) != null);
 
     // Verify dotfiles sourcing (bash-specific injection)
     const expected_source =
@@ -1203,43 +1218,46 @@ test "Remote Command Builder Test - Comprehensive" {
         \\fi;
         \\unset _zzh_rc;
     ;
-    const expected_source_b64 = try b64Encode(testing.allocator, expected_source);
-    defer testing.allocator.free(expected_source_b64);
-    var expected_source_buf = std.ArrayList(u8).init(testing.allocator);
-    defer expected_source_buf.deinit();
-    try expected_source_buf.writer().print(" -b {s}", .{expected_source_b64});
-    try testing.expect(std.mem.indexOf(u8, cmd, expected_source_buf.items) != null);
+    const expected_source_b64 = try b64Encode(std.testing.allocator, expected_source);
+    defer std.testing.allocator.free(expected_source_b64);
+    var expected_source_buf = std.ArrayList(u8).empty;
+    defer expected_source_buf.deinit(std.testing.allocator);
+    const f_buf2 = try std.fmt.allocPrint(std.testing.allocator, " -b {s}", .{expected_source_b64});
+    defer std.testing.allocator.free(f_buf2);
+    try expected_source_buf.appendSlice(std.testing.allocator, f_buf2);
+    try std.testing.expect(std.mem.indexOf(u8, cmd, expected_source_buf.items) != null);
 
-    try testing.expect(std.mem.indexOf(u8, cmd, " && rm -rf '/custom/home'") == null);
+    try std.testing.expect(std.mem.indexOf(u8, cmd, " && rm -rf '/custom/home'") == null);
 }
 
 test "Remote Command Builder Test - install_force" {
-    const testing = std.testing;
+    
 
-    var args = cli.OperationalConfig.init(testing.allocator);
-    defer args.deinit();
+    var args = cli.OperationalConfig.init(std.testing.allocator);
+    defer args.deinit(std.testing.allocator);
 
-    args.shell = try testing.allocator.dupe(u8, "zsh");
-    args.host_zzh_home = try testing.allocator.dupe(u8, "/custom/home");
+    args.shell = try std.testing.allocator.dupe(u8, "zsh");
+    args.host_zzh_home = try std.testing.allocator.dupe(u8, "/custom/home");
     args.install_force = true;
     args.install_force_full = false;
 
-    const staged_script = try compileStagedScript(testing.allocator, &args);
-    defer staged_script.deinit(testing.allocator);
-    const cmd = try std.mem.join(testing.allocator, " && ", &.{ staged_script.bootstrap_script, staged_script.session_script });
-    defer testing.allocator.free(cmd);
+    const staged_script = try compileStagedScript(std.testing.allocator, &args);
+    defer staged_script.deinit(std.testing.allocator);
+    const cmd = try std.mem.join(std.testing.allocator, " && ", &.{ staged_script.bootstrap_script, staged_script.session_script });
+    defer std.testing.allocator.free(cmd);
 
-    try testing.expect(std.mem.indexOf(u8, cmd, "rm -rf '/custom/home'/.zzh &&") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmd, "rm -rf '/custom/home'/.zzh &&") != null);
 }
 
 fn getTempDir(allocator: std.mem.Allocator) ![]const u8 {
     const builtin = @import("builtin");
     if (builtin.os.tag == .windows) {
-        var env_map = try std.process.getEnvMap(allocator);
+        var env_map = try config.global_environ.createMap(allocator);
         defer env_map.deinit();
         if (env_map.get("TEMP")) |temp| {
             return allocator.dupe(u8, temp);
         }
+        if (builtin.is_test) return allocator.dupe(u8, "C:\\Temp");
         return allocator.dupe(u8, "C:\\Temp");
     } else {
         return allocator.dupe(u8, "/tmp");
@@ -1247,119 +1265,123 @@ fn getTempDir(allocator: std.mem.Allocator) ![]const u8 {
 }
 
 test "Deploy and Connect Mock Test - Success" {
-    const testing = std.testing;
+    
     const builtin = @import("builtin");
 
-    const temp_base = try getTempDir(testing.allocator);
-    defer testing.allocator.free(temp_base);
+    const temp_base = try getTempDir(std.testing.allocator);
+    defer std.testing.allocator.free(temp_base);
 
-    const rand = std.crypto.random.int(u64);
+    var rand: u64 = 0;
+    std.testing.io.random(std.mem.asBytes(&rand));
     var sub_buf: [256]u8 = undefined;
     const sub_path = try std.fmt.bufPrint(&sub_buf, "{s}/success-{x}", .{ temp_base, rand });
-    try std.fs.makeDirAbsolute(sub_path);
-    defer std.fs.deleteTreeAbsolute(sub_path) catch {};
+    var threaded_io = std.Io.Threaded.init(std.testing.allocator, .{});
+    try std.Io.Dir.createDirAbsolute(threaded_io.io(), sub_path, .default_dir);
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, sub_path) catch {};
 
-    var args = cli.OperationalConfig.init(testing.allocator);
-    defer args.deinit();
+    var args = cli.OperationalConfig.init(std.testing.allocator);
+    defer args.deinit(std.testing.allocator);
 
-    args.shell = try testing.allocator.dupe(u8, "zsh");
-    args.destination = try testing.allocator.dupe(u8, "localhost");
+    args.shell = try std.testing.allocator.dupe(u8, "zsh");
+    args.destination = try std.testing.allocator.dupe(u8, "localhost");
     args.verbose = true; // Covers verbosity print branches
     args.vverbose = true; // Covers vverbose print branches
 
     // Set all SSH connection options to cover their parsing and construction in deployAndConnect
-    args.ssh_port = try testing.allocator.dupe(u8, "2222");
-    args.ssh_private_key = try testing.allocator.dupe(u8, "dummy_key");
-    args.ssh_login = try testing.allocator.dupe(u8, "user");
-    args.ssh_jump_host = try testing.allocator.dupe(u8, "jump");
-    try args.ssh_options.append(try testing.allocator.dupe(u8, "ForwardAgent=yes"));
-    try args.ssh_args.append(try testing.allocator.dupe(u8, "-v"));
+    args.ssh_port = try std.testing.allocator.dupe(u8, "2222");
+    args.ssh_private_key = try std.testing.allocator.dupe(u8, "dummy_key");
+    args.ssh_login = try std.testing.allocator.dupe(u8, "user");
+    args.ssh_jump_host = try std.testing.allocator.dupe(u8, "jump");
+    try args.ssh_options.append(std.testing.allocator, try std.testing.allocator.dupe(u8, "ForwardAgent=yes"));
+    try args.ssh_args.append(std.testing.allocator, try std.testing.allocator.dupe(u8, "-v"));
 
     if (builtin.os.tag == .windows) {
-        args.ssh_command = try testing.allocator.dupe(u8, "cmd.exe");
-        try args.ssh_args.append(try testing.allocator.dupe(u8, "/c"));
-        try args.ssh_args.append(try testing.allocator.dupe(u8, "exit 0"));
+        args.ssh_command = try std.testing.allocator.dupe(u8, "cmd.exe");
+        try args.ssh_args.append(std.testing.allocator, try std.testing.allocator.dupe(u8, "/c"));
+        try args.ssh_args.append(std.testing.allocator, try std.testing.allocator.dupe(u8, "exit 0"));
     } else {
-        args.ssh_command = try testing.allocator.dupe(u8, "true");
+        args.ssh_command = try std.testing.allocator.dupe(u8, "true");
     }
 
-    try deployAndConnect(testing.allocator, &args, sub_path, &.{});
+    var test_io = std.Io.Threaded.init(std.testing.allocator, .{});
+    defer test_io.deinit();
+    try deployAndConnect(std.testing.allocator, &args, sub_path, &.{}, test_io.io());
 }
 
 test "escapePathForShell Test" {
-    const testing = std.testing;
+    
 
-    const res1 = try escapePathForShell(testing.allocator, "~/.zzh");
-    defer testing.allocator.free(res1);
-    try testing.expectEqualStrings("~/'.zzh'", res1);
+    const res1 = try escapePathForShell(std.testing.allocator, "~/.zzh");
+    defer std.testing.allocator.free(res1);
+    try std.testing.expectEqualStrings("~/'.zzh'", res1);
 
-    const res2 = try escapePathForShell(testing.allocator, "~user/some dir");
-    defer testing.allocator.free(res2);
-    try testing.expectEqualStrings("~user/'some dir'", res2);
+    const res2 = try escapePathForShell(std.testing.allocator, "~user/some dir");
+    defer std.testing.allocator.free(res2);
+    try std.testing.expectEqualStrings("~user/'some dir'", res2);
 
-    const res3 = try escapePathForShell(testing.allocator, "~");
-    defer testing.allocator.free(res3);
-    try testing.expectEqualStrings("~", res3);
+    const res3 = try escapePathForShell(std.testing.allocator, "~");
+    defer std.testing.allocator.free(res3);
+    try std.testing.expectEqualStrings("~", res3);
 
-    const res4 = try escapePathForShell(testing.allocator, "/absolute/path");
-    defer testing.allocator.free(res4);
-    try testing.expectEqualStrings("'/absolute/path'", res4);
+    const res4 = try escapePathForShell(std.testing.allocator, "/absolute/path");
+    defer std.testing.allocator.free(res4);
+    try std.testing.expectEqualStrings("'/absolute/path'", res4);
 
-    const res5 = try escapePathForShell(testing.allocator, "~/path'with'quote");
-    defer testing.allocator.free(res5);
-    try testing.expectEqualStrings("~/'path'\\''with'\\''quote'", res5);
+    const res5 = try escapePathForShell(std.testing.allocator, "~/path'with'quote");
+    defer std.testing.allocator.free(res5);
+    try std.testing.expectEqualStrings("~/'path'\\''with'\\''quote'", res5);
 
-    const res6 = try escapePathForShell(testing.allocator, "~/");
-    defer testing.allocator.free(res6);
-    try testing.expectEqualStrings("~/", res6);
+    const res6 = try escapePathForShell(std.testing.allocator, "~/");
+    defer std.testing.allocator.free(res6);
+    try std.testing.expectEqualStrings("~/", res6);
 
-    const res7 = try escapePathForShell(testing.allocator, "~user/");
-    defer testing.allocator.free(res7);
-    try testing.expectEqualStrings("~user/", res7);
+    const res7 = try escapePathForShell(std.testing.allocator, "~user/");
+    defer std.testing.allocator.free(res7);
+    try std.testing.expectEqualStrings("~user/", res7);
 
-    const res8 = try escapePathForShell(testing.allocator, "~user/some dir/");
-    defer testing.allocator.free(res8);
-    try testing.expectEqualStrings("~user/'some dir/'", res8);
+    const res8 = try escapePathForShell(std.testing.allocator, "~user/some dir/");
+    defer std.testing.allocator.free(res8);
+    try std.testing.expectEqualStrings("~user/'some dir/'", res8);
 }
 
 test "normalizeOs and normalizeArch tests" {
-    const testing = std.testing;
+    
 
     // Test normalizeOs
-    const os1 = try normalizeOs(testing.allocator, "Linux");
-    defer testing.allocator.free(os1);
-    try testing.expectEqualStrings("linux", os1);
+    const os1 = try normalizeOs(std.testing.allocator, "Linux");
+    defer std.testing.allocator.free(os1);
+    try std.testing.expectEqualStrings("linux", os1);
 
-    const os2 = try normalizeOs(testing.allocator, "Darwin");
-    defer testing.allocator.free(os2);
-    try testing.expectEqualStrings("darwin", os2);
+    const os2 = try normalizeOs(std.testing.allocator, "Darwin");
+    defer std.testing.allocator.free(os2);
+    try std.testing.expectEqualStrings("darwin", os2);
 
-    const os3 = try normalizeOs(testing.allocator, "FreeBSD");
-    defer testing.allocator.free(os3);
-    try testing.expectEqualStrings("freebsd", os3);
+    const os3 = try normalizeOs(std.testing.allocator, "FreeBSD");
+    defer std.testing.allocator.free(os3);
+    try std.testing.expectEqualStrings("freebsd", os3);
 
-    const os4 = try normalizeOs(testing.allocator, "MINGW64_NT-10.0");
-    defer testing.allocator.free(os4);
-    try testing.expectEqualStrings("linux", os4); // safe fallback
+    const os4 = try normalizeOs(std.testing.allocator, "MINGW64_NT-10.0");
+    defer std.testing.allocator.free(os4);
+    try std.testing.expectEqualStrings("linux", os4); // safe fallback
 
     // Test normalizeArch
-    const arch1 = try normalizeArch(testing.allocator, "x86_64");
-    defer testing.allocator.free(arch1);
-    try testing.expectEqualStrings("x86_64", arch1);
+    const arch1 = try normalizeArch(std.testing.allocator, "x86_64");
+    defer std.testing.allocator.free(arch1);
+    try std.testing.expectEqualStrings("x86_64", arch1);
 
-    const arch2 = try normalizeArch(testing.allocator, "amd64");
-    defer testing.allocator.free(arch2);
-    try testing.expectEqualStrings("x86_64", arch2);
+    const arch2 = try normalizeArch(std.testing.allocator, "amd64");
+    defer std.testing.allocator.free(arch2);
+    try std.testing.expectEqualStrings("x86_64", arch2);
 
-    const arch3 = try normalizeArch(testing.allocator, "aarch64");
-    defer testing.allocator.free(arch3);
-    try testing.expectEqualStrings("aarch64", arch3);
+    const arch3 = try normalizeArch(std.testing.allocator, "aarch64");
+    defer std.testing.allocator.free(arch3);
+    try std.testing.expectEqualStrings("aarch64", arch3);
 
-    const arch4 = try normalizeArch(testing.allocator, "arm64");
-    defer testing.allocator.free(arch4);
-    try testing.expectEqualStrings("aarch64", arch4);
+    const arch4 = try normalizeArch(std.testing.allocator, "arm64");
+    defer std.testing.allocator.free(arch4);
+    try std.testing.expectEqualStrings("aarch64", arch4);
 
-    const arch5 = try normalizeArch(testing.allocator, "riscv64");
-    defer testing.allocator.free(arch5);
-    try testing.expectEqualStrings("x86_64", arch5); // fallback
+    const arch5 = try normalizeArch(std.testing.allocator, "riscv64");
+    defer std.testing.allocator.free(arch5);
+    try std.testing.expectEqualStrings("x86_64", arch5); // fallback
 }

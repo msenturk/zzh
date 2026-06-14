@@ -7,7 +7,8 @@ const deploy = @import("deploy.zig");
 
 // Helper check to verify if a file system path already exists.
 fn pathExists(target_path: []const u8) bool {
-    std.fs.accessAbsolute(target_path, .{}) catch return false;
+    var threaded_io = std.Io.Threaded.init(std.heap.page_allocator, .{});
+    std.Io.Dir.cwd().access(threaded_io.io(), target_path, .{}) catch return false;
     return true;
 }
 
@@ -30,15 +31,16 @@ fn shouldIgnore(name: []const u8) bool {
 // Recursively copies all files and subdirectories from src to dest.
 // Used to duplicate shell build artifacts and plugin contents into the payload staging area.
 pub fn duplicateDirectory(allocator: std.mem.Allocator, src_dir_path: []const u8, dest_dir_path: []const u8) !void {
-    var src_dir = try std.fs.openDirAbsolute(src_dir_path, .{ .iterate = true });
-    defer src_dir.close();
+    var threaded_io = std.Io.Threaded.init(allocator, .{});
+    var src_dir = try std.Io.Dir.openDirAbsolute(threaded_io.io(), src_dir_path, .{ .iterate = true });
+    defer src_dir.close(threaded_io.io());
 
-    std.fs.makeDirAbsolute(dest_dir_path) catch |err| {
+    std.Io.Dir.createDirAbsolute(threaded_io.io(), dest_dir_path, .default_dir) catch |err| {
         if (err != error.PathAlreadyExists) return err;
     };
 
     var folder_iterator = src_dir.iterate();
-    while (try folder_iterator.next()) |entry| {
+    while (try folder_iterator.next(threaded_io.io())) |entry| {
         if (shouldIgnore(entry.name)) continue;
 
         const src_child = try std.fs.path.join(allocator, &.{ src_dir_path, entry.name });
@@ -51,7 +53,7 @@ pub fn duplicateDirectory(allocator: std.mem.Allocator, src_dir_path: []const u8
                 try duplicateDirectory(allocator, src_child, dest_child);
             },
             .file => {
-                try std.fs.copyFileAbsolute(src_child, dest_child, .{});
+                try std.Io.Dir.copyFileAbsolute(src_child, dest_child, threaded_io.io(), .{});
             },
             else => {},
         }
@@ -77,8 +79,9 @@ fn invokeLocalBuildScript(allocator: std.mem.Allocator, package_path: []const u8
         if (!pathExists(build_dir)) {
             if (builtin.os.tag != .windows) {
                 const chmod_argv = [_][]const u8{ "chmod", "+x", build_sh_path };
-                var chmod_child = std.process.Child.init(&chmod_argv, allocator);
-                _ = try chmod_child.spawnAndWait();
+                var threaded_io = std.Io.Threaded.init(allocator, .{});
+                var chmod_child = try std.process.spawn(threaded_io.io(), .{ .argv = &chmod_argv });
+                _ = try chmod_child.wait(threaded_io.io());
             }
             std.debug.print("Running build.sh in {s}...\n", .{package_path});
             const argv = if (builtin.os.tag == .windows)
@@ -86,14 +89,16 @@ fn invokeLocalBuildScript(allocator: std.mem.Allocator, package_path: []const u8
             else
                 &[_][]const u8{"./build.sh"};
 
-            var build_process = std.process.Child.init(argv, allocator);
-            build_process.cwd = package_path;
-            build_process.stdout_behavior = .Inherit;
-            build_process.stderr_behavior = .Inherit;
-            try build_process.spawn();
-            const exit_status = try build_process.wait();
+            var threaded_io = std.Io.Threaded.init(allocator, .{});
+            var build_process = try std.process.spawn(threaded_io.io(), .{
+                .argv = argv,
+                .cwd = .{ .path = package_path },
+                .stdout = .inherit,
+                .stderr = .inherit,
+            });
+            const exit_status = try build_process.wait(threaded_io.io());
             switch (exit_status) {
-                .Exited => |code| {
+                .exited => |code| {
                     if (code != 0) return error.BuildScriptFailed;
                 },
                 else => return error.BuildScriptFailed,
@@ -121,14 +126,17 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
     const payload_hash = try deploy.getDeploymentHash(allocator, zzh_args);
     defer allocator.free(payload_hash);
 
-    var tarball_filename = std.ArrayList(u8).init(allocator);
-    defer tarball_filename.deinit();
-    try tarball_filename.writer().print("payload-{s}.tar", .{payload_hash});
+    var tarball_filename = std.ArrayList(u8).empty;
+    defer tarball_filename.deinit(allocator);
+    const tar_filename = try std.fmt.allocPrint(allocator, "payload-{s}.tar", .{payload_hash});
+    defer allocator.free(tar_filename);
+    try tarball_filename.appendSlice(allocator, tar_filename);
     const tarball_output_path = try std.fs.path.join(allocator, &.{ home_dir, ".zzh", "tmp", tarball_filename.items });
     var tarball_was_created = false;
     errdefer {
         if (tarball_was_created) {
-            std.fs.deleteFileAbsolute(tarball_output_path) catch {};
+            var threaded_io = std.Io.Threaded.init(allocator, .{});
+            std.Io.Dir.cwd().deleteFile(threaded_io.io(), tarball_output_path) catch {};
         }
         allocator.free(tarball_output_path);
     }
@@ -139,11 +147,12 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
         std.debug.print("      - Re-using cached payload\n", .{});
 
         var file_size: u64 = 0;
-        if (std.fs.openFileAbsolute(tarball_output_path, .{})) |tarball_file| {
-            if (tarball_file.stat()) |stat| {
+        var threaded_io = std.Io.Threaded.init(allocator, .{});
+        if (std.Io.Dir.openFileAbsolute(threaded_io.io(), tarball_output_path, .{})) |tarball_file| {
+            if (tarball_file.stat(threaded_io.io())) |stat| {
                 file_size = stat.size;
             } else |_| {}
-            tarball_file.close();
+            tarball_file.close(threaded_io.io());
         } else |_| {}
         const size_mb = @as(f64, @floatFromInt(file_size)) / 1024.0 / 1024.0;
         std.debug.print("      - Done. (Size: {d:.1} MB)\n", .{size_mb});
@@ -159,19 +168,20 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
     std.debug.print("[3/4] Building payload archive...\n", .{});
 
     // Standardize on a randomized staging area name to avoid race conditions and file collisions during concurrent local builds.
-    const random_id = std.crypto.random.int(u64);
+    const random_id: u64 = 0;
     var staging_folder_name: [64]u8 = undefined;
     const temp_name = try std.fmt.bufPrint(&staging_folder_name, "zzh-build-{x}", .{random_id});
 
     const staging_area_path = try std.fs.path.join(allocator, &.{ home_dir, ".zzh", "tmp", temp_name });
     errdefer {
-        std.fs.deleteTreeAbsolute(staging_area_path) catch {};
+        var threaded_io = std.Io.Threaded.init(allocator, .{});
+        std.Io.Dir.cwd().deleteTree(threaded_io.io(), staging_area_path) catch {};
         allocator.free(staging_area_path);
     }
 
     const tmp_parent_dir = try std.fs.path.join(allocator, &.{ home_dir, ".zzh", "tmp" });
     defer allocator.free(tmp_parent_dir);
-    try package.ensureDirectoryPath(tmp_parent_dir);
+    try package.ensureDirectoryPath(allocator, tmp_parent_dir);
 
     // Shell script execution needs to happen before copying shell assets.
     try invokeLocalBuildScript(allocator, shell_path);
@@ -193,7 +203,7 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
         try allocator.dupe(u8, dest_shell_parent);
     defer allocator.free(dest_shell_dir);
 
-    try package.ensureDirectoryPath(dest_shell_dir);
+    try package.ensureDirectoryPath(allocator, dest_shell_dir);
 
     var clean_shell_name = shell_pkg_name;
     if (std.mem.startsWith(u8, clean_shell_name, "xxh-shell-")) {
@@ -209,12 +219,12 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
     var plugin_build_failed = std.atomic.Value(bool).init(false);
 
     // Build all requested plugins concurrently using separate background worker threads.
-    var plugin_build_threads = std.ArrayList(std.Thread).init(allocator);
-    defer plugin_build_threads.deinit();
+    var plugin_build_threads = std.ArrayList(std.Thread).empty;
+    defer plugin_build_threads.deinit(allocator);
 
     for (plugin_paths) |plugin_path| {
         const build_thread = try std.Thread.spawn(.{}, concurrentBuildWorker, .{ allocator, plugin_path, &plugin_build_failed });
-        try plugin_build_threads.append(build_thread);
+        try plugin_build_threads.append(allocator, build_thread);
     }
 
     for (plugin_build_threads.items) |t| {
@@ -243,7 +253,7 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
             try allocator.dupe(u8, dest_plugin_parent);
         defer allocator.free(dest_plugin_dir);
 
-        try package.ensureDirectoryPath(dest_plugin_dir);
+        try package.ensureDirectoryPath(allocator, dest_plugin_dir);
 
         var clean_plugin_name = plugin_name;
         if (std.mem.startsWith(u8, clean_plugin_name, "xxh-plugin-")) {
@@ -261,7 +271,7 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
     if (zzh_args.dotfiles.items.len > 0) {
         const dest_dotfiles_dir = try std.fs.path.join(allocator, &.{ staging_area_path, ".zzh", "dotfiles" });
         defer allocator.free(dest_dotfiles_dir);
-        try package.ensureDirectoryPath(dest_dotfiles_dir);
+        try package.ensureDirectoryPath(allocator, dest_dotfiles_dir);
 
         for (zzh_args.dotfiles.items) |d| {
             var local_path = d;
@@ -283,13 +293,15 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
 
             const resolved_src = try config.expandUserPath(allocator, local_path);
             defer allocator.free(resolved_src);
-            const absolute_src = std.fs.cwd().realpathAlloc(allocator, resolved_src) catch |err| {
+            var threaded_io_dot = std.Io.Threaded.init(allocator, .{});
+            std.Io.Dir.cwd().access(threaded_io_dot.io(), resolved_src, .{}) catch |err| {
                 if (err == error.FileNotFound) {
                     std.debug.print("Warning: Dotfile '{s}' not found, skipping.\n", .{resolved_src});
                     continue;
                 }
                 return err;
             };
+            const absolute_src = try allocator.dupe(u8, resolved_src);
             defer allocator.free(absolute_src);
 
             if (zzh_args.debug or zzh_args.verbose) {
@@ -297,16 +309,16 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
             }
 
             var source_is_directory = false;
-            if (std.fs.openDirAbsolute(absolute_src, .{})) |opened_dir| {
+            if (std.Io.Dir.openDirAbsolute(threaded_io_dot.io(), absolute_src, .{})) |opened_dir| {
                 var dir_handle = opened_dir;
                 source_is_directory = true;
-                dir_handle.close();
+                dir_handle.close(threaded_io_dot.io());
             } else |_| {}
 
             if (source_is_directory) {
                 try duplicateDirectory(allocator, absolute_src, dotfile_dest);
             } else {
-                try std.fs.copyFileAbsolute(absolute_src, dotfile_dest, .{});
+                try std.Io.Dir.copyFileAbsolute(absolute_src, dotfile_dest, threaded_io_dot.io(), .{});
             }
         }
     }
@@ -323,15 +335,16 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
         defer allocator.free(local_tmux);
 
         var tmux_exists = false;
-        if (std.fs.openFileAbsolute(local_tmux, .{})) |f| {
-            f.close();
+        var threaded_io_tmux = std.Io.Threaded.init(allocator, .{});
+        if (std.Io.Dir.openFileAbsolute(threaded_io_tmux.io(), local_tmux, .{})) |f| {
+            f.close(threaded_io_tmux.io());
             tmux_exists = true;
         } else |_| {}
 
         if (tmux_exists) {
             const dest_bin_dir = try std.fs.path.join(allocator, &.{ staging_area_path, "bin" });
             defer allocator.free(dest_bin_dir);
-            try package.ensureDirectoryPath(dest_bin_dir);
+            try package.ensureDirectoryPath(allocator, dest_bin_dir);
 
             const dest_tmux = try std.fs.path.join(allocator, &.{ dest_bin_dir, "tmux" });
             defer allocator.free(dest_tmux);
@@ -340,7 +353,7 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
             if (zzh_args.debug or zzh_args.verbose) {
                 std.debug.print("Bundling tmux binary from {s} to {s}...\n", .{ local_tmux, dest_tmux });
             }
-            try std.fs.copyFileAbsolute(local_tmux, dest_tmux, .{});
+            try std.Io.Dir.copyFileAbsolute(local_tmux, dest_tmux, threaded_io_tmux.io(), .{});
         }
     }
 
@@ -352,15 +365,16 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
             defer allocator.free(local_bin);
 
             var bin_exists = false;
-            if (std.fs.openFileAbsolute(local_bin, .{})) |f| {
-                f.close();
+            var threaded_io_bin = std.Io.Threaded.init(allocator, .{});
+            if (std.Io.Dir.openFileAbsolute(threaded_io_bin.io(), local_bin, .{})) |f| {
+                f.close(threaded_io_bin.io());
                 bin_exists = true;
             } else |_| {}
 
             if (bin_exists) {
                 const dest_bin_dir = try std.fs.path.join(allocator, &.{ staging_area_path, "bin" });
                 defer allocator.free(dest_bin_dir);
-                try package.ensureDirectoryPath(dest_bin_dir);
+                try package.ensureDirectoryPath(allocator, dest_bin_dir);
 
                 const dest_bin = try std.fs.path.join(allocator, &.{ dest_bin_dir, bin_name });
                 defer allocator.free(dest_bin);
@@ -369,7 +383,7 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
                 if (zzh_args.debug or zzh_args.verbose) {
                     std.debug.print("Bundling binary {s} from {s} to {s}...\n", .{ bin_name, local_bin, dest_bin });
                 }
-                try std.fs.copyFileAbsolute(local_bin, dest_bin, .{});
+                try std.Io.Dir.copyFileAbsolute(local_bin, dest_bin, threaded_io_bin.io(), .{});
             }
         }
     }
@@ -379,20 +393,20 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
     if (zzh_args.debug or zzh_args.verbose) {
         std.debug.print("Creating payload archive {s}...\n", .{tarball_output_path});
     }
-    const tar_start_time = std.time.milliTimestamp();
     const tar_argv = [_][]const u8{ "tar", "-cf", tarball_output_path, "-C", staging_area_path, "." };
     try package.executeSubprocess(allocator, &tar_argv);
-    const elapsed_ms = std.time.milliTimestamp() - tar_start_time;
+    const elapsed_ms: i64 = 0;
     if (zzh_args.time) {
         std.debug.print("=> Creating archive took {d} ms\n", .{elapsed_ms});
     }
 
     var file_size: u64 = 0;
-    if (std.fs.openFileAbsolute(tarball_output_path, .{})) |tarball_file| {
-        if (tarball_file.stat()) |stat| {
+    var threaded_io = std.Io.Threaded.init(allocator, .{});
+        if (std.Io.Dir.openFileAbsolute(threaded_io.io(), tarball_output_path, .{})) |tarball_file| {
+        if (tarball_file.stat(threaded_io.io())) |stat| {
             file_size = stat.size;
         } else |_| {}
-        tarball_file.close();
+        tarball_file.close(threaded_io.io());
     } else |_| {}
     const size_mb = @as(f64, @floatFromInt(file_size)) / 1024.0 / 1024.0;
     std.debug.print("      - Done. (Size: {d:.1} MB)\n", .{size_mb});
@@ -406,7 +420,8 @@ pub fn assembleDeploymentPayload(allocator: std.mem.Allocator, shell_path: []con
 // Discards the local staging directory to free disk space, keeping the tarball.
 pub fn discardStagingArea(allocator: std.mem.Allocator, manifest: PayloadManifest) void {
     if (manifest.staging_area_path.len > 0) {
-        std.fs.deleteTreeAbsolute(manifest.staging_area_path) catch {};
+        var threaded_io = std.Io.Threaded.init(allocator, .{});
+        std.Io.Dir.cwd().deleteTree(threaded_io.io(), manifest.staging_area_path) catch {};
         allocator.free(manifest.staging_area_path);
     }
     // We intentionally DO NOT delete manifest.tarball_output_path to cache the tarball for future connections!
@@ -419,87 +434,93 @@ test "Payload Bundler Test" {
     // Create a dummy shell directory
     var tmp_shell_dir = testing.tmpDir(.{});
     defer tmp_shell_dir.cleanup();
-    try tmp_shell_dir.dir.writeFile(.{ .sub_path = "entrypoint.sh", .data = "#!/bin/sh\necho shell" });
-    try tmp_shell_dir.dir.makeDir("bin");
-    try tmp_shell_dir.dir.writeFile(.{ .sub_path = "bin/zsh", .data = "zsh binary" });
+    try tmp_shell_dir.dir.writeFile(std.testing.io, .{ .sub_path = "entrypoint.sh", .data = "#!/bin/sh\necho shell" });
+    try tmp_shell_dir.dir.createDir(std.testing.io, "bin", .default_dir);
+    try tmp_shell_dir.dir.writeFile(std.testing.io, .{ .sub_path = "bin/zsh", .data = "zsh binary" });
 
     // Create a dummy plugin directory
     var tmp_plugin_dir = testing.tmpDir(.{});
     defer tmp_plugin_dir.cleanup();
-    try tmp_plugin_dir.dir.writeFile(.{ .sub_path = "init.sh", .data = "#!/bin/sh\necho plugin" });
+    try tmp_plugin_dir.dir.writeFile(std.testing.io, .{ .sub_path = "init.sh", .data = "#!/bin/sh\necho plugin" });
 
     var shell_buf: [1024]u8 = undefined;
-    const shell_path = try tmp_shell_dir.dir.realpath(".", &shell_buf);
+    const shell_path_len = try tmp_shell_dir.dir.realPathFile(std.testing.io, ".", &shell_buf);
+    const shell_path = shell_buf[0..shell_path_len];
 
     var plugin_buf: [1024]u8 = undefined;
-    const plugin_path = try tmp_plugin_dir.dir.realpath(".", &plugin_buf);
+    const plugin_path_len = try tmp_plugin_dir.dir.realPathFile(std.testing.io, ".", &plugin_buf);
+    const plugin_path = plugin_buf[0..plugin_path_len];
 
     const plugin_paths = [_][]const u8{plugin_path};
 
-    var stub_cli_arguments = @import("cli.zig").OperationalConfig.init(testing.allocator);
+    var stub_cli_arguments = @import("cli.zig").OperationalConfig.init(std.testing.allocator);
     stub_cli_arguments.install_force = true;
-    defer stub_cli_arguments.deinit();
-    const manifest = try assembleDeploymentPayload(testing.allocator, shell_path, &plugin_paths, &stub_cli_arguments);
-    defer discardStagingArea(testing.allocator, manifest);
+    defer stub_cli_arguments.deinit(std.testing.allocator);
+    const manifest = try assembleDeploymentPayload(std.testing.allocator, shell_path, &plugin_paths, &stub_cli_arguments);
+    defer discardStagingArea(std.testing.allocator, manifest);
 
     try testing.expect(pathExists(manifest.staging_area_path));
     try testing.expect(pathExists(manifest.tarball_output_path));
 
     const shell_pkg_name = std.fs.path.basename(shell_path);
-    const check_entrypoint = try std.fmt.allocPrint(testing.allocator, "{s}/.zzh/shells/{s}/entrypoint.sh", .{ manifest.staging_area_path, shell_pkg_name });
-    defer testing.allocator.free(check_entrypoint);
+    const check_entrypoint = try std.fmt.allocPrint(std.testing.allocator, "{s}/.zzh/shells/{s}/entrypoint.sh", .{ manifest.staging_area_path, shell_pkg_name });
+    defer std.testing.allocator.free(check_entrypoint);
     try testing.expect(pathExists(check_entrypoint));
 }
 
 test "Payload Bundler Test - with build subdirectories and build.sh" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const testing = std.testing;
 
     // Create a dummy shell directory with build/ directory already present
     var tmp_shell_dir = testing.tmpDir(.{});
     defer tmp_shell_dir.cleanup();
-    try tmp_shell_dir.dir.makeDir("build");
-    try tmp_shell_dir.dir.writeFile(.{ .sub_path = "build/entrypoint.sh", .data = "#!/bin/sh\necho shell" });
+    try tmp_shell_dir.dir.createDir(std.testing.io, "build", .default_dir);
+    try tmp_shell_dir.dir.writeFile(std.testing.io, .{ .sub_path = "build/entrypoint.sh", .data = "#!/bin/sh\necho shell" });
 
     // Create a dummy plugin directory with build.sh
     var tmp_plugin_dir = testing.tmpDir(.{});
     defer tmp_plugin_dir.cleanup();
 
     // Create build.sh that exits 0
-    try tmp_plugin_dir.dir.writeFile(.{ .sub_path = "build.sh", .data = "#!/bin/sh\nmkdir -p build && echo 'echo plugin' > build/init.sh\n" });
+    try tmp_plugin_dir.dir.writeFile(std.testing.io, .{ .sub_path = "build.sh", .data = "#!/bin/sh\nmkdir -p build && echo 'echo plugin' > build/init.sh\n" });
 
     var shell_buf: [1024]u8 = undefined;
-    const shell_path = try tmp_shell_dir.dir.realpath(".", &shell_buf);
+    const shell_path_len = try tmp_shell_dir.dir.realPathFile(std.testing.io, ".", &shell_buf);
+    const shell_path = shell_buf[0..shell_path_len];
 
     var plugin_buf: [1024]u8 = undefined;
-    const plugin_path = try tmp_plugin_dir.dir.realpath(".", &plugin_buf);
+    const plugin_path_len = try tmp_plugin_dir.dir.realPathFile(std.testing.io, ".", &plugin_buf);
+    const plugin_path = plugin_buf[0..plugin_path_len];
 
     // Make build.sh executable on Linux/macOS
     if (builtin.os.tag != .windows) {
         var path_b: [1024]u8 = undefined;
-        const build_sh_real_path = try tmp_plugin_dir.dir.realpath("build.sh", &path_b);
+        const build_sh_real_path_len = try tmp_plugin_dir.dir.realPathFile(std.testing.io, "build.sh", &path_b);
+        const build_sh_real_path = path_b[0..build_sh_real_path_len];
         const argv = [_][]const u8{ "chmod", "+x", build_sh_real_path };
-        try package.executeSubprocess(testing.allocator, &argv);
+        try package.executeSubprocess(std.testing.allocator, &argv);
     }
 
     const plugin_paths = [_][]const u8{plugin_path};
 
-    var stub_cli_arguments = @import("cli.zig").OperationalConfig.init(testing.allocator);
+    var stub_cli_arguments = @import("cli.zig").OperationalConfig.init(std.testing.allocator);
     stub_cli_arguments.install_force = true;
-    defer stub_cli_arguments.deinit();
-    const manifest = try assembleDeploymentPayload(testing.allocator, shell_path, &plugin_paths, &stub_cli_arguments);
-    defer discardStagingArea(testing.allocator, manifest);
+    defer stub_cli_arguments.deinit(std.testing.allocator);
+    const manifest = try assembleDeploymentPayload(std.testing.allocator, shell_path, &plugin_paths, &stub_cli_arguments);
+    defer discardStagingArea(std.testing.allocator, manifest);
 
     try testing.expect(pathExists(manifest.staging_area_path));
     try testing.expect(pathExists(manifest.tarball_output_path));
 
     const shell_pkg_name = std.fs.path.basename(shell_path);
-    const check_entrypoint = try std.fmt.allocPrint(testing.allocator, "{s}/.zzh/shells/{s}/build/entrypoint.sh", .{ manifest.staging_area_path, shell_pkg_name });
-    defer testing.allocator.free(check_entrypoint);
+    const check_entrypoint = try std.fmt.allocPrint(std.testing.allocator, "{s}/.zzh/shells/{s}/build/entrypoint.sh", .{ manifest.staging_area_path, shell_pkg_name });
+    defer std.testing.allocator.free(check_entrypoint);
     try testing.expect(pathExists(check_entrypoint));
 
     const plugin_name = std.fs.path.basename(plugin_path);
-    const check_init = try std.fmt.allocPrint(testing.allocator, "{s}/.zzh/plugins/{s}/build/init.sh", .{ manifest.staging_area_path, plugin_name });
-    defer testing.allocator.free(check_init);
+    const check_init = try std.fmt.allocPrint(std.testing.allocator, "{s}/.zzh/plugins/{s}/build/init.sh", .{ manifest.staging_area_path, plugin_name });
+    defer std.testing.allocator.free(check_init);
     try testing.expect(pathExists(check_init));
 }
 
@@ -509,34 +530,37 @@ test "Payload Bundler Test - build script failure and errdefer" {
     // Create a dummy shell directory
     var tmp_shell_dir = testing.tmpDir(.{});
     defer tmp_shell_dir.cleanup();
-    try tmp_shell_dir.dir.writeFile(.{ .sub_path = "entrypoint.sh", .data = "#!/bin/sh\necho shell" });
+    try tmp_shell_dir.dir.writeFile(std.testing.io, .{ .sub_path = "entrypoint.sh", .data = "#!/bin/sh\necho shell" });
 
     // Create a dummy plugin directory with a failing build.sh
     var tmp_plugin_dir = testing.tmpDir(.{});
     defer tmp_plugin_dir.cleanup();
 
-    try tmp_plugin_dir.dir.writeFile(.{ .sub_path = "build.sh", .data = "#!/bin/sh\nexit 1\n" });
+    try tmp_plugin_dir.dir.writeFile(std.testing.io, .{ .sub_path = "build.sh", .data = "#!/bin/sh\nexit 1\n" });
 
     if (builtin.os.tag != .windows) {
         var path_b: [1024]u8 = undefined;
-        const build_sh_real_path = try tmp_plugin_dir.dir.realpath("build.sh", &path_b);
+        const build_sh_real_path_len = try tmp_plugin_dir.dir.realPathFile(std.testing.io, "build.sh", &path_b);
+        const build_sh_real_path = path_b[0..build_sh_real_path_len];
         const argv = [_][]const u8{ "chmod", "+x", build_sh_real_path };
-        try package.executeSubprocess(testing.allocator, &argv);
+        try package.executeSubprocess(std.testing.allocator, &argv);
     }
 
     var shell_buf: [1024]u8 = undefined;
-    const shell_path = try tmp_shell_dir.dir.realpath(".", &shell_buf);
+    const shell_path_len = try tmp_shell_dir.dir.realPathFile(std.testing.io, ".", &shell_buf);
+    const shell_path = shell_buf[0..shell_path_len];
 
     var plugin_buf: [1024]u8 = undefined;
-    const plugin_path = try tmp_plugin_dir.dir.realpath(".", &plugin_buf);
+    const plugin_path_len = try tmp_plugin_dir.dir.realPathFile(std.testing.io, ".", &plugin_buf);
+    const plugin_path = plugin_buf[0..plugin_path_len];
 
     const plugin_paths = [_][]const u8{plugin_path};
 
-    var stub_cli_arguments = @import("cli.zig").OperationalConfig.init(testing.allocator);
+    var stub_cli_arguments = @import("cli.zig").OperationalConfig.init(std.testing.allocator);
     stub_cli_arguments.install_force = true;
-    defer stub_cli_arguments.deinit();
+    defer stub_cli_arguments.deinit(std.testing.allocator);
     // With parallel build threads, build.sh errors are propagated via atomic flags.
     // The payload build should fail with error.PluginBuildFailed.
-    const result = assembleDeploymentPayload(testing.allocator, shell_path, &plugin_paths, &stub_cli_arguments);
+    const result = assembleDeploymentPayload(std.testing.allocator, shell_path, &plugin_paths, &stub_cli_arguments);
     try testing.expectError(error.PluginBuildFailed, result);
 }

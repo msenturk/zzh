@@ -6,10 +6,20 @@ const bundler = @import("bundler.zig");
 const deploy = @import("deploy.zig");
 const builtin = @import("builtin");
 
+fn pathDeleteFileAbsolute(allocator: std.mem.Allocator, path: []const u8) !void {
+    var temp_io = std.Io.Threaded.init(allocator, .{});
+    defer temp_io.deinit();
+    try std.Io.Dir.deleteFileAbsolute(temp_io.io(), path);
+}
+fn pathDeleteTreeAbsolute(allocator: std.mem.Allocator, path: []const u8) !void {
+    var temp_io = std.Io.Threaded.init(allocator, .{});
+    defer temp_io.deinit();
+    try std.Io.Dir.cwd().deleteTree(temp_io.io(), path);
+}
+
 /// Lists all custom static binaries installed locally.
 fn listBinaries(allocator: std.mem.Allocator, custom_zzh_home: ?[]const u8) !void {
-    const standard_output = std.io.getStdOut().writer();
-    var resolved_zzh_root: []const u8 = undefined;
+        var resolved_zzh_root: []const u8 = undefined;
     if (custom_zzh_home) |lh| {
         resolved_zzh_root = try config.expandUserPath(allocator, lh);
     } else {
@@ -22,24 +32,25 @@ fn listBinaries(allocator: std.mem.Allocator, custom_zzh_home: ?[]const u8) !voi
     const binary_directory_path = try std.fs.path.join(allocator, &.{ resolved_zzh_root, "bin" });
     defer allocator.free(binary_directory_path);
 
-    var binary_directory = std.fs.openDirAbsolute(binary_directory_path, .{ .iterate = true }) catch |err| {
+    var temp_io1 = std.Io.Threaded.init(allocator, .{});
+    defer temp_io1.deinit();
+    var binary_directory = std.Io.Dir.openDirAbsolute(temp_io1.io(), binary_directory_path, .{ .iterate = true }) catch |err| {
         if (err == error.FileNotFound) return;
         return err;
     };
-    defer binary_directory.close();
+    defer binary_directory.close(temp_io1.io());
 
     var directory_iterator = binary_directory.iterate();
-    while (try directory_iterator.next()) |file_entry| {
+    while (try directory_iterator.next(temp_io1.io())) |file_entry| {
         if (file_entry.kind != .directory) {
-            try standard_output.print("{s}\n", .{file_entry.name});
+            std.debug.print("{s}\n", .{file_entry.name});
         }
     }
 }
 
 /// Lists all shells or plugins matching a filter set.
 fn listPackages(allocator: std.mem.Allocator, custom_zzh_home: ?[]const u8, package_filter_list: []const []const u8) !void {
-    const standard_output = std.io.getStdOut().writer();
-    var resolved_zzh_root: []const u8 = undefined;
+        var resolved_zzh_root: []const u8 = undefined;
     if (custom_zzh_home) |lh| {
         resolved_zzh_root = try config.expandUserPath(allocator, lh);
     } else {
@@ -54,14 +65,16 @@ fn listPackages(allocator: std.mem.Allocator, custom_zzh_home: ?[]const u8, pack
         const target_category_path = try std.fs.path.join(allocator, &.{ resolved_zzh_root, ".zzh", sub });
         defer allocator.free(target_category_path);
 
-        var category_directory = std.fs.openDirAbsolute(target_category_path, .{ .iterate = true }) catch |err| {
+        var temp_io2 = std.Io.Threaded.init(allocator, .{});
+        defer temp_io2.deinit();
+        var category_directory = std.Io.Dir.openDirAbsolute(temp_io2.io(), target_category_path, .{ .iterate = true }) catch |err| {
             if (err == error.FileNotFound) continue;
             return err;
         };
-        defer category_directory.close();
+        defer category_directory.close(temp_io2.io());
 
         var directory_iterator = category_directory.iterate();
-        while (try directory_iterator.next()) |folder_entry| {
+        while (try directory_iterator.next(temp_io2.io())) |folder_entry| {
             if (folder_entry.kind == .directory and std.mem.startsWith(u8, folder_entry.name, "xxh-")) {
                 if (package_filter_list.len > 0) {
                     var matches_filter = false;
@@ -72,10 +85,10 @@ fn listPackages(allocator: std.mem.Allocator, custom_zzh_home: ?[]const u8, pack
                         }
                     }
                     if (matches_filter) {
-                        try standard_output.print("{s}\n", .{folder_entry.name});
+                        std.debug.print("{s}\n", .{folder_entry.name});
                     }
                 } else {
-                    try standard_output.print("{s}\n", .{folder_entry.name});
+                    std.debug.print("{s}\n", .{folder_entry.name});
                 }
             }
         }
@@ -84,8 +97,7 @@ fn listPackages(allocator: std.mem.Allocator, custom_zzh_home: ?[]const u8, pack
 
 /// Helper function to list all subfolders for a specific categories (shells or plugins).
 fn listShellsOrPlugins(allocator: std.mem.Allocator, custom_zzh_home: ?[]const u8, category_name: []const u8) !void {
-    const standard_output = std.io.getStdOut().writer();
-    var resolved_zzh_root: []const u8 = undefined;
+        var resolved_zzh_root: []const u8 = undefined;
     if (custom_zzh_home) |lh| {
         resolved_zzh_root = try config.expandUserPath(allocator, lh);
     } else {
@@ -98,24 +110,25 @@ fn listShellsOrPlugins(allocator: std.mem.Allocator, custom_zzh_home: ?[]const u
     const category_directory_path = try std.fs.path.join(allocator, &.{ resolved_zzh_root, ".zzh", category_name });
     defer allocator.free(category_directory_path);
 
-    var category_directory = std.fs.openDirAbsolute(category_directory_path, .{ .iterate = true }) catch |err| {
+    var temp_io3 = std.Io.Threaded.init(allocator, .{});
+    defer temp_io3.deinit();
+    var category_directory = std.Io.Dir.openDirAbsolute(temp_io3.io(), category_directory_path, .{ .iterate = true }) catch |err| {
         if (err == error.FileNotFound) return;
         return err;
     };
-    defer category_directory.close();
+    defer category_directory.close(temp_io3.io());
 
     var directory_iterator = category_directory.iterate();
-    while (try directory_iterator.next()) |folder_entry| {
+    while (try directory_iterator.next(temp_io3.io())) |folder_entry| {
         if (folder_entry.kind == .directory and std.mem.startsWith(u8, folder_entry.name, "xxh-")) {
-            try standard_output.print("{s}\n", .{folder_entry.name});
+            std.debug.print("{s}\n", .{folder_entry.name});
         }
     }
 }
 
 /// Renders the zzh usage instructions.
 fn printHelp() void {
-    const standard_output = std.io.getStdOut().writer();
-    standard_output.print(
+    std.debug.print(
         \\Usage: zzh [ssh arguments] [user@]host[:port] [zzh arguments]
         \\
         \\Bring your favorite shell wherever you go through the ssh.
@@ -181,26 +194,27 @@ fn printHelp() void {
         \\
         \\For more details, visit: https://github.com/msenturk/zzh
         \\
-    , .{}) catch {};
+    , .{});
 }
 
-pub fn main() !void {
-    var local_heap = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = local_heap.deinit();
-    const allocator = local_heap.allocator();
+pub fn main(init: std.process.Init) !void {
+    config.global_environ = init.minimal.environ;
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-    var args_list = std.ArrayList([]const u8).init(allocator);
+    var args_list = std.ArrayList([]const u8).empty;
     defer {
         for (args_list.items) |arg| allocator.free(arg);
-        args_list.deinit();
+        args_list.deinit(allocator);
     }
 
     {
-        var unfiltered_arguments = try std.process.argsWithAllocator(allocator);
+        var unfiltered_arguments = try init.minimal.args.iterateAllocator(allocator);
         defer unfiltered_arguments.deinit();
         _ = unfiltered_arguments.next(); // Skip executable path token.
         while (unfiltered_arguments.next()) |arg| {
-            try args_list.append(try allocator.dupe(u8, arg));
+            try args_list.append(allocator, try allocator.dupe(u8, arg));
         }
     }
 
@@ -216,13 +230,15 @@ pub fn main() !void {
             _ = posix_setsid();
         }
 
-        var setsid_exec_arguments = std.ArrayList([]const u8).init(allocator);
-        defer setsid_exec_arguments.deinit();
+        var setsid_exec_arguments = std.ArrayList([]const u8).empty;
+        defer setsid_exec_arguments.deinit(allocator);
 
         if (args_list.items.len > 1) {
-            try setsid_exec_arguments.appendSlice(args_list.items[1..]);
+            try setsid_exec_arguments.appendSlice(allocator, args_list.items[1..]);
             if (builtin.os.tag != .windows) {
-                return std.process.execv(allocator, setsid_exec_arguments.items);
+                var th_io_exec: std.Io.Threaded = .init(allocator, .{});
+                defer th_io_exec.deinit();
+                return std.process.replace(th_io_exec.io(), .{ .argv = setsid_exec_arguments.items });
             } else {
                 unreachable;
             }
@@ -233,14 +249,15 @@ pub fn main() !void {
 
     // Check if we are being invoked as an internal SSH_ASKPASS provider.
     // SSH uses this protocol to dynamically prompt for passwords when running without a control terminal.
-    if (std.process.getEnvVarOwned(allocator, "ZZH_INTERNAL_ASKPASS")) |askpass_env| {
+    if (init.minimal.environ.getAlloc(allocator, "ZZH_INTERNAL_ASKPASS")) |askpass_env| {
         defer allocator.free(askpass_env);
         if (std.mem.eql(u8, askpass_env, "1")) {
-            if (std.process.getEnvVarOwned(allocator, "ZZH_INTERNAL_PASSWORD")) |stored_password| {
+            if (init.minimal.environ.getAlloc(allocator, "ZZH_INTERNAL_PASSWORD")) |stored_password| {
                 defer allocator.free(stored_password);
-                const standard_output = std.io.getStdOut().writer();
-                standard_output.writeAll(stored_password) catch {};
-                standard_output.writeAll("\n") catch {};
+                var temp_io = std.Io.Threaded.init(allocator, .{});
+                defer temp_io.deinit();
+                std.Io.File.writeStreamingAll(std.Io.File.stdout(), temp_io.io(), stored_password) catch {};
+                std.Io.File.writeStreamingAll(std.Io.File.stdout(), temp_io.io(), "\n") catch {};
                 std.process.exit(0);
             } else |_| {
                 std.process.exit(1);
@@ -250,7 +267,7 @@ pub fn main() !void {
 
     // Parse command line options to detect config paths and operational parameters.
     var preliminary_arguments = cli.OperationalConfig.init(allocator);
-    defer preliminary_arguments.deinit();
+    defer preliminary_arguments.deinit(allocator);
     try cli.populateConfigFromTokens(allocator, args_list.items, &preliminary_arguments);
 
     if (preliminary_arguments.help) {
@@ -277,10 +294,10 @@ pub fn main() !void {
         std.process.exit(1);
     }
 
-    var resolved_configuration_options = std.ArrayList([]const u8).init(allocator);
+    var resolved_configuration_options = std.ArrayList([]const u8).empty;
     defer {
         for (resolved_configuration_options.items) |item| allocator.free(item);
-        resolved_configuration_options.deinit();
+        resolved_configuration_options.deinit(allocator);
     }
 
     if (preliminary_arguments.destination) |destination_uri| {
@@ -296,7 +313,7 @@ pub fn main() !void {
 
     // Merge arguments: Config file arguments first, then command-line arguments to allow overriding.
     var operational_settings = cli.OperationalConfig.init(allocator);
-    defer operational_settings.deinit();
+    defer operational_settings.deinit(allocator);
 
     try cli.populateConfigFromTokens(allocator, resolved_configuration_options.items, &operational_settings);
 
@@ -370,14 +387,16 @@ pub fn main() !void {
             defer allocator.free(package_install_path);
 
             var package_directory_exists = false;
-            if (std.fs.openDirAbsolute(package_install_path, .{})) |d| {
+            var temp_io4 = std.Io.Threaded.init(allocator, .{});
+            defer temp_io4.deinit();
+            if (std.Io.Dir.openDirAbsolute(temp_io4.io(), package_install_path, .{})) |d| {
                 package_directory_exists = true;
                 var mutable_d = d;
-                mutable_d.close();
+                mutable_d.close(temp_io4.io());
             } else |_| {}
 
             if (package_directory_exists) {
-                std.fs.deleteTreeAbsolute(package_install_path) catch {};
+                pathDeleteTreeAbsolute(allocator, package_install_path) catch {};
                 std.debug.print("Removed package {s}\n", .{package_vitals.clean_name});
                 deleted = true;
             }
@@ -385,12 +404,12 @@ pub fn main() !void {
             const binary_install_path = try std.fs.path.join(allocator, &.{ resolved_zzh_root, "bin", pkg_name });
             defer allocator.free(binary_install_path);
             var binary_file_exists = false;
-            if (std.fs.accessAbsolute(binary_install_path, .{})) |_| {
+            if (std.Io.Dir.accessAbsolute(temp_io4.io(), binary_install_path, .{})) |_| {
                 binary_file_exists = true;
             } else |_| {}
 
             if (binary_file_exists) {
-                std.fs.deleteFileAbsolute(binary_install_path) catch {};
+                pathDeleteFileAbsolute(allocator, binary_install_path) catch {};
                 std.debug.print("Removed binary {s}\n", .{pkg_name});
                 deleted = true;
             }
@@ -426,7 +445,7 @@ pub fn main() !void {
         if (completed_offline_action) {
             return;
         } else {
-            std.debug.print("Usage: zzh [ssh arguments] [user@]host[:port] [zzh arguments]\n", .{});
+            std.debug.print("{s}", .{"Usage: zzh [ssh arguments] [user@]host[:port] [zzh arguments]\n"});
             std.process.exit(1);
         }
     }
@@ -443,7 +462,7 @@ pub fn main() !void {
     }
 
     // [1/4] Resolving packages...
-    std.debug.print("[1/4] Resolving packages...\n", .{});
+    std.debug.print("{s}", .{"[1/4] Resolving packages...\n"});
     const shell_name = operational_settings.shell orelse "zsh";
     std.debug.print("      - Shell: {s} (xxh-shell-{s})\n", .{ shell_name, shell_name });
     for (operational_settings.plugins.items) |plugin_name| {
@@ -456,23 +475,23 @@ pub fn main() !void {
         std.debug.print("      - Dotfile: {s}\n", .{dotfile});
     }
     if (operational_settings.dotfiles.items.len == 0 and !operational_settings.quiet) {
-        std.debug.print("      - Note: No dotfiles configured. " ++
-            "Add '+d ~/.bashrc' or set dotfiles in config.zzhc\n", .{});
+        std.debug.print("{s}", .{"      - Note: No dotfiles configured. " ++
+            "Add '+d ~/.bashrc' or set dotfiles in config.zzhc\n"});
     }
 
     const resolved_shell = try package.fetchPackageVitals(allocator, shell_name, true);
     defer package.releasePackageVitals(allocator, resolved_shell);
 
     // [2/4] Downloading & caching...
-    std.debug.print("[2/4] Downloading & caching...\n", .{});
+    std.debug.print("{s}", .{"[2/4] Downloading & caching...\n"});
 
     const cached_shell_directory = try package.obtainAndCachePackage(allocator, resolved_shell, true, operational_settings.install_force, operational_settings.local_zzh_home);
     defer allocator.free(cached_shell_directory);
 
-    var cached_plugin_directories = std.ArrayList([]const u8).init(allocator);
+    var cached_plugin_directories = std.ArrayList([]const u8).empty;
     defer {
         for (cached_plugin_directories.items) |p| allocator.free(p);
-        cached_plugin_directories.deinit();
+        cached_plugin_directories.deinit(allocator);
     }
 
     for (operational_settings.plugins.items) |plugin_name| {
@@ -480,15 +499,18 @@ pub fn main() !void {
         defer package.releasePackageVitals(allocator, resolved_plugin);
 
         const plugin_path = try package.obtainAndCachePackage(allocator, resolved_plugin, false, operational_settings.install_force, operational_settings.local_zzh_home);
-        try cached_plugin_directories.append(plugin_path);
+        try cached_plugin_directories.append(allocator, plugin_path);
     }
+
+    var threaded_io = std.Io.Threaded.init(allocator, .{});
+    defer threaded_io.deinit();
 
     // Query for user password securely on Windows before launching connections
     // if passwordless access fails and no password was passed on the command line.
     // On Unix, SSH multiplexing is enabled, so we can let SSH prompt natively
     // once and reuse the connection, avoiding the extra check handshake latency.
     if (builtin.os.tag == .windows and operational_settings.password == null) {
-        if (!try deploy.checkPasswordless(allocator, &operational_settings)) {
+        if (!try deploy.checkPasswordless(allocator, &operational_settings, threaded_io.io())) {
             var prompt_buffer: [256]u8 = undefined;
             const user_prompt = try std.fmt.bufPrint(&prompt_buffer, "{s}'s password: ", .{operational_settings.destination.?});
             const input_password = try cli.readMaskedPasswordFromTerminal(allocator, user_prompt);
@@ -501,13 +523,14 @@ pub fn main() !void {
         &operational_settings,
         cached_shell_directory,
         cached_plugin_directories.items,
+        threaded_io.io(),
     );
 }
 
 test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit();
-    try list.append(42);
+    var list = std.ArrayList(i32).empty;
+    defer list.deinit(std.testing.allocator);
+    try list.append(std.testing.allocator, 42);
     try std.testing.expectEqual(@as(i32, 42), list.pop());
 }
 

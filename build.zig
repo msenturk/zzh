@@ -7,9 +7,11 @@ pub fn build(b: *std.Build) void {
     // Create the core application executable
     const exe = b.addExecutable(.{
         .name = "zzh",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     b.installArtifact(exe);
 
@@ -24,9 +26,11 @@ pub fn build(b: *std.Build) void {
 
     // Tests
     const exe_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
@@ -36,9 +40,11 @@ pub fn build(b: *std.Build) void {
     // End-to-end Tests
     const e2e_exe = b.addExecutable(.{
         .name = "test-e2e",
-        .root_source_file = b.path("src/test-e2e.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/test-e2e.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     const run_e2e = b.addRunArtifact(e2e_exe);
     const e2e_step = b.step("e2e", "Run end-to-end tests");

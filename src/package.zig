@@ -1,6 +1,35 @@
 const std = @import("std");
 const config = @import("config.zig");
 
+fn pathCopyFileAbsolute(allocator: std.mem.Allocator, source_path: []const u8, dest_path: []const u8) !void {
+    var temp_io = std.Io.Threaded.init(allocator, .{});
+    defer temp_io.deinit();
+    try std.Io.Dir.copyFileAbsolute(source_path, dest_path, temp_io.io(), .{});
+}
+
+var _temp_counter: u64 = 0;
+fn getNextTempCounter() u64 {
+    _temp_counter += 1;
+    return _temp_counter;
+}
+
+fn pathDeleteFileAbsolute(allocator: std.mem.Allocator, path: []const u8) !void {
+    var temp_io = std.Io.Threaded.init(allocator, .{});
+    defer temp_io.deinit();
+    try std.Io.Dir.deleteFileAbsolute(temp_io.io(), path);
+}
+fn pathDeleteTreeAbsolute(allocator: std.mem.Allocator, path: []const u8) !void {
+    var temp_io = std.Io.Threaded.init(allocator, .{});
+    defer temp_io.deinit();
+    try std.Io.Dir.cwd().deleteTree(temp_io.io(), path);
+}
+
+fn pathExistsAbsolute(allocator: std.mem.Allocator, path: []const u8) bool {
+    var temp_io = std.Io.Threaded.init(allocator, .{});
+    defer temp_io.deinit();
+    std.Io.Dir.accessAbsolute(temp_io.io(), path, .{}) catch return false;
+    return true;
+}
 /// Metadata defining a remote shell or plugin repository/url to download.
 pub const DownloaderManifest = struct {
     name: []const u8,
@@ -95,10 +124,14 @@ pub noinline fn fetchPackageVitals(allocator: std.mem.Allocator, raw_name: []con
         var local_pkg_path: []u8 = "";
         
         // Check if the package exists in the current working directory (e.g., during development)
-        if (std.fs.cwd().realpathAlloc(allocator, ".")) |cwd_path| {
+        var temp_io = std.Io.Threaded.init(allocator, .{});
+        defer temp_io.deinit();
+        if (std.Io.Dir.cwd().realPathFileAlloc(temp_io.io(), ".", allocator)) |cwd_path| {
             defer allocator.free(cwd_path);
             if (std.fs.path.join(allocator, &.{ cwd_path, sub_dir, resolved_name })) |joined| {
-                if (std.fs.cwd().access(joined, .{})) |_| {
+                var threaded_io = std.Io.Threaded.init(allocator, .{});
+                defer threaded_io.deinit();
+                if (std.Io.Dir.cwd().access(threaded_io.io(), joined, .{})) |_| {
                     is_local = true;
                     local_pkg_path = joined;
                 } else |_| {
@@ -118,7 +151,7 @@ pub noinline fn fetchPackageVitals(allocator: std.mem.Allocator, raw_name: []con
 }
 
 /// Recursively creates a local directory path if it does not already exist.
-pub fn ensureDirectoryPath(target_directory: []const u8) !void {
+pub fn ensureDirectoryPath(allocator: std.mem.Allocator, target_directory: []const u8) !void {
     var char_idx: usize = 0;
     while (char_idx < target_directory.len) : (char_idx += 1) {
         if (target_directory[char_idx] == '/' or target_directory[char_idx] == '\\') {
@@ -127,25 +160,29 @@ pub fn ensureDirectoryPath(target_directory: []const u8) !void {
             if (char_idx == 2 and target_directory[1] == ':') continue;
 
             const sub_path = target_directory[0..char_idx];
-            std.fs.makeDirAbsolute(sub_path) catch |err| {
+            var threaded_io = std.Io.Threaded.init(allocator, .{});
+            std.Io.Dir.createDirAbsolute(threaded_io.io(), sub_path, .default_dir) catch |err| {
                 if (err != error.PathAlreadyExists) return err;
             };
         }
     }
-    std.fs.makeDirAbsolute(target_directory) catch |err| {
+    var threaded_io = std.Io.Threaded.init(std.heap.page_allocator, .{});
+    std.Io.Dir.createDirAbsolute(threaded_io.io(), target_directory, .default_dir) catch |err| {
         if (err != error.PathAlreadyExists) return err;
     };
 }
 
 /// Spawns a subprocess and blocks until it exits. Returns error if command returns non-zero.
 pub fn executeSubprocess(allocator: std.mem.Allocator, command_argv: []const []const u8) !void {
-    var child_process = std.process.Child.init(command_argv, allocator);
-    child_process.stdout_behavior = .Inherit;
-    child_process.stderr_behavior = .Inherit;
-    try child_process.spawn();
-    const exit_status = try child_process.wait();
+    var threaded_io = std.Io.Threaded.init(allocator, .{});
+    var child_process = try std.process.spawn(threaded_io.io(), .{
+        .argv = command_argv,
+        .stdout = .inherit,
+        .stderr = .inherit,
+    });
+    const exit_status = try child_process.wait(threaded_io.io());
     switch (exit_status) {
-        .Exited => |code| {
+        .exited => |code| {
             if (code != 0) return error.CommandFailed;
         },
         else => return error.CommandFailed,
@@ -162,7 +199,7 @@ fn fetchStaticallyCompiledNushellPlugin(allocator: std.mem.Allocator, plugin_nam
     const temp_tarball = try std.fs.path.join(allocator, &.{ target_dir, tarball_name });
     defer allocator.free(temp_tarball);
 
-    try ensureDirectoryPath(target_dir);
+    try ensureDirectoryPath(allocator, target_dir);
 
     const arch_str = switch (@import("builtin").cpu.arch) {
         .x86_64 => "x86_64",
@@ -191,18 +228,22 @@ fn fetchStaticallyCompiledNushellPlugin(allocator: std.mem.Allocator, plugin_nam
     const dest_path = try std.fs.path.join(allocator, &.{ target_dir, bin_filename });
     defer allocator.free(dest_path);
 
-    try std.fs.renameAbsolute(src_path, dest_path);
+    var threaded_io = std.Io.Threaded.init(allocator, .{});
+    defer threaded_io.deinit();
+    try std.Io.Dir.renameAbsolute(src_path, dest_path, threaded_io.io());
 
     const extracted_dir_path = try std.fs.path.join(allocator, &.{ target_dir, extracted_folder_name });
     defer allocator.free(extracted_dir_path);
-    try std.fs.deleteTreeAbsolute(extracted_dir_path);
-    try std.fs.deleteFileAbsolute(temp_tarball);
+    try pathDeleteTreeAbsolute(allocator, extracted_dir_path);
+    try pathDeleteFileAbsolute(allocator, temp_tarball);
 }
 
 fn downloadAndExtractTarball(allocator: std.mem.Allocator, package_name: []const u8, download_url: []const u8, target_dir: []const u8) !void {
     std.debug.print("      - Downloading {s} (tarball)...\n", .{package_name});
     
-    var client = std.http.Client{ .allocator = allocator };
+    var temp_io = std.Io.Threaded.init(allocator, .{});
+    defer temp_io.deinit();
+    var client = std.http.Client{ .allocator = allocator, .io = temp_io.io() };
     defer client.deinit();
 
     var current_url = try allocator.dupe(u8, download_url);
@@ -211,41 +252,44 @@ fn downloadAndExtractTarball(allocator: std.mem.Allocator, package_name: []const
     var header_buf: [16384]u8 = undefined;
     var redirects: usize = 0;
     
-    var file_stream: std.fs.File = undefined;
+    var file_stream: std.Io.File = undefined;
     const temp_tarball = try std.fmt.allocPrint(allocator, "{s}.tar.gz", .{target_dir});
     defer allocator.free(temp_tarball);
 
     while (redirects < 5) : (redirects += 1) {
         const uri = try std.Uri.parse(current_url);
-        var req = try client.open(.GET, uri, .{ .server_header_buffer = &header_buf });
+        var req = try client.request(.GET, uri, .{ 
+            .headers = .{ .accept_encoding = .{ .override = "gzip, deflate" } },
+            .redirect_behavior = .unhandled,
+        });
         defer req.deinit();
 
-        try req.send();
-        try req.finish();
-        try req.wait();
+        try req.sendBodiless();
+        var response = try req.receiveHead(&header_buf);
 
-        if (req.response.status == .found or req.response.status == .moved_permanently) {
-            if (req.response.location) |loc| {
+        if (response.head.status == .found or response.head.status == .moved_permanently) {
+            if (response.head.location) |loc| {
                 allocator.free(current_url);
                 current_url = try allocator.dupe(u8, loc);
                 continue;
             } else {
                 return error.HttpRedirectMissingLocation;
             }
-        } else if (req.response.status == .ok) {
-            file_stream = try std.fs.cwd().createFile(temp_tarball, .{});
-            defer file_stream.close();
+        } else if (response.head.status == .ok) {
+            file_stream = try std.Io.Dir.cwd().createFile(temp_io.io(), temp_tarball, .{});
+            defer file_stream.close(temp_io.io());
 
-            var reader = req.reader();
+            var transfer_buf: [4096]u8 = undefined;
+            var req_reader = response.reader(&transfer_buf);
             var buf: [16384]u8 = undefined;
             while (true) {
-                const amt = try reader.read(&buf);
+                const amt = try req_reader.readSliceShort(&buf);
                 if (amt == 0) break;
-                try file_stream.writeAll(buf[0..amt]);
+                try file_stream.writeStreamingAll(temp_io.io(), buf[0..amt]);
             }
             break;
         } else {
-            std.debug.print("      - HTTP Error: {d}\n", .{req.response.status});
+            std.debug.print("      - HTTP Error: {d}\n", .{response.head.status});
             return error.HttpDownloadFailed;
         }
     }
@@ -253,14 +297,14 @@ fn downloadAndExtractTarball(allocator: std.mem.Allocator, package_name: []const
     if (redirects >= 5) return error.HttpTooManyRedirects;
 
     // Ensure the target_dir exists
-    std.fs.deleteTreeAbsolute(target_dir) catch {};
-    try ensureDirectoryPath(target_dir);
+    pathDeleteTreeAbsolute(allocator, target_dir) catch {};
+    try ensureDirectoryPath(allocator, target_dir);
 
     // Extract tarball natively via `tar` CLI to perfectly preserve file permissions
     const tar_argv = [_][]const u8{ "tar", "-xzf", temp_tarball, "-C", target_dir, "--strip-components=1" };
     try executeSubprocess(allocator, &tar_argv);
 
-    try std.fs.deleteFileAbsolute(temp_tarball);
+    try pathDeleteFileAbsolute(allocator, temp_tarball);
 }
 
 /// Iterates through all cached packages locally and pulls the latest changes via 'git pull --rebase'.
@@ -285,11 +329,13 @@ pub fn refreshCachedRepositories(allocator: std.mem.Allocator, local_xxh_home: ?
         const dir_path = try std.fs.path.join(allocator, &.{ base_dir, ".zzh", sub_dir });
         defer allocator.free(dir_path);
 
-        var dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch continue;
-        defer dir.close();
+        var temp_io1 = std.Io.Threaded.init(allocator, .{});
+        defer temp_io1.deinit();
+        var dir = std.Io.Dir.openDirAbsolute(temp_io1.io(), dir_path, .{ .iterate = true }) catch continue;
+        defer dir.close(temp_io1.io());
 
         var it = dir.iterate();
-        while (try it.next()) |entry| {
+        while (try it.next(temp_io1.io())) |entry| {
             if (entry.kind == .directory) {
                 const pkg_dir = try std.fs.path.join(allocator, &.{ dir_path, entry.name });
                 defer allocator.free(pkg_dir);
@@ -297,19 +343,22 @@ pub fn refreshCachedRepositories(allocator: std.mem.Allocator, local_xxh_home: ?
                 const git_dir = try std.fs.path.join(allocator, &.{ pkg_dir, ".git" });
                 defer allocator.free(git_dir);
 
-                std.fs.accessAbsolute(git_dir, .{}) catch continue;
+                if (!pathExistsAbsolute(allocator, git_dir)) continue;
 
                 std.debug.print("Updating {s}...\n", .{entry.name});
                 const argv = [_][]const u8{ "git", "pull", "--rebase" };
-                var child = std.process.Child.init(&argv, allocator);
-                child.cwd = pkg_dir;
-                child.stdout_behavior = .Inherit;
-                child.stderr_behavior = .Inherit;
-                child.spawn() catch {
+                var threaded_io = std.Io.Threaded.init(allocator, .{});
+                defer threaded_io.deinit();
+                var child = std.process.spawn(threaded_io.io(), .{
+                    .argv = &argv,
+                    .cwd = .{ .path = pkg_dir },
+                    .stdout = .inherit,
+                    .stderr = .inherit,
+                }) catch {
                     std.debug.print("Failed to spawn git pull for {s}\n", .{entry.name});
                     continue;
                 };
-                _ = child.wait() catch continue;
+                _ = child.wait(threaded_io.io()) catch continue;
             }
         }
     }
@@ -331,15 +380,15 @@ pub fn provisionStaticallyCompiledTmux(allocator: std.mem.Allocator, install_for
 
     const bin_dir = try std.fs.path.join(allocator, &.{ base_dir, "bin" });
     defer allocator.free(bin_dir);
-    try ensureDirectoryPath(bin_dir);
+    try ensureDirectoryPath(allocator, bin_dir);
 
     const tmux_path = try std.fs.path.join(allocator, &.{ bin_dir, "tmux" });
     errdefer allocator.free(tmux_path);
 
     const exists = blk: {
-        std.fs.accessAbsolute(tmux_path, .{}) catch {
+        if (!pathExistsAbsolute(allocator, tmux_path)) {
             break :blk false;
-        };
+        }
         break :blk true;
     };
 
@@ -354,7 +403,7 @@ pub fn provisionStaticallyCompiledTmux(allocator: std.mem.Allocator, install_for
 
     const archive_path = try std.fmt.allocPrint(allocator, "{s}.tar.gz", .{tmux_path});
     defer {
-        std.fs.deleteFileAbsolute(archive_path) catch {};
+        pathDeleteFileAbsolute(allocator, archive_path) catch {};
         allocator.free(archive_path);
     }
 
@@ -395,23 +444,19 @@ pub fn obtainAndCachePackage(allocator: std.mem.Allocator, pkg: DownloaderManife
     errdefer allocator.free(target_dir);
 
     var exists = true;
-    std.fs.accessAbsolute(target_dir, .{}) catch |err| {
-        if (err == error.FileNotFound) {
-            exists = false;
-        } else {
-            return err;
-        }
-    };
+    if (!pathExistsAbsolute(allocator, target_dir)) {
+        exists = false;
+    }
 
     if (exists and install_force) {
-        std.fs.deleteTreeAbsolute(target_dir) catch {};
+        pathDeleteTreeAbsolute(allocator, target_dir) catch {};
         exists = false;
     }
 
     if (!exists) {
         const parent_dir = try std.fs.path.join(allocator, &.{ base_dir, ".zzh", sub_dir });
         defer allocator.free(parent_dir);
-        try ensureDirectoryPath(parent_dir);
+        try ensureDirectoryPath(allocator, parent_dir);
 
         if (!is_shell and std.mem.startsWith(u8, pkg.clean_name, "xxh-plugin-nu-")) {
             const plugin_suffix = pkg.clean_name["xxh-plugin-nu-".len..];
@@ -486,14 +531,16 @@ fn normalizeGitHubRepoPath(allocator: std.mem.Allocator, raw_url: []const u8) ![
 fn searchDirectoryForFile(allocator: std.mem.Allocator, dir_path: []const u8, target_name: []const u8, depth: u8) !?[]const u8 {
     if (depth > 8) return null;
 
-    var dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch |err| {
+    var temp_io2 = std.Io.Threaded.init(allocator, .{});
+    defer temp_io2.deinit();
+    var dir = std.Io.Dir.openDirAbsolute(temp_io2.io(), dir_path, .{ .iterate = true }) catch |err| {
         if (err == error.FileNotFound) return null;
         return err;
     };
-    defer dir.close();
+    defer dir.close(temp_io2.io());
 
     var it = dir.iterate();
-    while (try it.next()) |entry| {
+    while (try it.next(temp_io2.io())) |entry| {
         if (entry.kind == .directory) {
             const sub_path = try std.fs.path.join(allocator, &.{ dir_path, entry.name });
             defer allocator.free(sub_path);
@@ -535,7 +582,7 @@ fn promptUserSelectRepo(repos: []RepoSearchItem) !usize {
     const stdout = std.io.getStdOut().writer();
     const stdin = std.io.getStdIn().reader();
 
-    try stdout.print("\nMultiple GitHub repositories found for search. Please select one:\n", .{});
+    try stdout.print("\nMultiple GitHub repositories found for search. Please select one:\n");
     for (repos, 0..) |repo, idx| {
         const desc = repo.description orelse "";
         try stdout.print("  [{d}] {s} ({d} stars) - {s}\n", .{ idx + 1, repo.full_name, repo.stargazers_count, desc });
@@ -550,7 +597,7 @@ fn promptUserSelectRepo(repos: []RepoSearchItem) !usize {
                     const c = stdin.readByte() catch break;
                     if (c == '\n') break;
                 }
-                try stdout.print("Input too long. Please try again.\n", .{});
+                try stdout.print("Input too long. Please try again.\n");
                 continue;
             }
             return err;
@@ -576,7 +623,7 @@ fn promptUserSelectAsset(assets: []ReleaseAsset) !usize {
     const stdout = std.io.getStdOut().writer();
     const stdin = std.io.getStdIn().reader();
 
-    try stdout.print("\nCompatible release assets found. Please select one to download:\n", .{});
+    try stdout.print("\nCompatible release assets found. Please select one to download:\n");
     for (assets, 0..) |asset, idx| {
         try stdout.print("  [{d}] {s}\n", .{ idx + 1, asset.name });
     }
@@ -590,7 +637,7 @@ fn promptUserSelectAsset(assets: []ReleaseAsset) !usize {
                     const c = stdin.readByte() catch break;
                     if (c == '\n') break;
                 }
-                try stdout.print("Input too long. Please try again.\n", .{});
+                try stdout.print("Input too long. Please try again.\n");
                 continue;
             }
             return err;
@@ -638,8 +685,8 @@ fn findBestMatchingRepo(items: []RepoSearchItem, query: []const u8) usize {
 fn selectReleaseAsset(allocator: std.mem.Allocator, assets: []ReleaseAsset, target_os: []const u8, target_arch: []const u8) !ReleaseAsset {
     const is_x64 = std.mem.eql(u8, target_arch, "x86_64");
 
-    var filtered = std.ArrayList(ReleaseAsset).init(allocator);
-    defer filtered.deinit();
+    var filtered = std.ArrayList(ReleaseAsset).empty;
+    defer filtered.deinit(allocator);
 
     // Filter stage 1: OS and Architecture matching
     for (assets) |asset| {
@@ -656,7 +703,7 @@ fn selectReleaseAsset(allocator: std.mem.Allocator, assets: []ReleaseAsset, targ
                 if (std.mem.endsWith(u8, name, ".deb") or std.mem.endsWith(u8, name, ".rpm") or std.mem.endsWith(u8, name, ".apk")) {
                     continue;
                 }
-                try filtered.append(asset);
+                try filtered.append(allocator, asset);
             }
         }
     }
@@ -672,7 +719,7 @@ fn selectReleaseAsset(allocator: std.mem.Allocator, assets: []ReleaseAsset, targ
 
             if (has_arch_match) {
                 if (std.mem.endsWith(u8, name, ".tar.gz") or std.mem.endsWith(u8, name, ".tgz") or std.mem.endsWith(u8, name, ".zip")) {
-                    try filtered.append(asset);
+                    try filtered.append(allocator, asset);
                 }
             }
         }
@@ -688,7 +735,7 @@ fn selectReleaseAsset(allocator: std.mem.Allocator, assets: []ReleaseAsset, targ
         return candidates[0];
     }
 
-    if (std.io.getStdIn().isTty() and std.io.getStdOut().isTty()) {
+            if (false) {
         const idx = try promptUserSelectAsset(candidates);
         return candidates[idx];
     } else {
@@ -705,28 +752,20 @@ fn selectReleaseAsset(allocator: std.mem.Allocator, assets: []ReleaseAsset, targ
 
 /// Spawns a child process and reads stdout into a dynamically-allocated buffer.
 pub fn executeSubprocessAndCaptureOutput(allocator: std.mem.Allocator, command_argv: []const []const u8) ![]const u8 {
-    var child = std.process.Child.init(command_argv, allocator);
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Ignore;
-    try child.spawn();
+    var temp_io = std.Io.Threaded.init(allocator, .{});
+    defer temp_io.deinit();
 
-    var out_buf = std.ArrayList(u8).init(allocator);
-    errdefer out_buf.deinit();
-
-    var stdout_reader = child.stdout.?.reader();
-    while (true) {
-        var buf: [4096]u8 = undefined;
-        const amt = try stdout_reader.read(&buf);
-        if (amt == 0) break;
-        try out_buf.appendSlice(buf[0..amt]);
-    }
-
-    const term = try child.wait();
-    if (term != .Exited or term.Exited != 0) {
+    const result = try std.process.run(allocator, temp_io.io(), .{
+        .argv = command_argv,
+    });
+    
+    if (result.term != .exited or result.term.exited != 0) {
+        allocator.free(result.stdout);
+        allocator.free(result.stderr);
         return error.CommandFailed;
     }
-
-    return out_buf.toOwnedSlice();
+    allocator.free(result.stderr);
+    return result.stdout;
 }
 
 /// Fetches and extracts a statically compiled target executable from GitHub Releases or direct URL.
@@ -751,15 +790,15 @@ pub fn provisionStaticallyCompiledBinary(
     const bin_name = extractExecutableName(repo_input);
     const bin_dir = try std.fs.path.join(allocator, &.{ base_dir, "bin" });
     defer allocator.free(bin_dir);
-    try ensureDirectoryPath(bin_dir);
+    try ensureDirectoryPath(allocator, bin_dir);
 
     const dest_bin_path = try std.fs.path.join(allocator, &.{ bin_dir, bin_name });
     defer allocator.free(dest_bin_path);
 
     const exists = blk: {
-        std.fs.accessAbsolute(dest_bin_path, .{}) catch {
+        if (!pathExistsAbsolute(allocator, dest_bin_path)) {
             break :blk false;
-        };
+        }
         break :blk true;
     };
 
@@ -806,12 +845,12 @@ pub fn provisionStaticallyCompiledBinary(
             std.mem.endsWith(u8, resolved_repo_input, ".zip");
 
         if (is_archive) {
-            const rand = std.crypto.random.int(u64);
+            const rand = getNextTempCounter();
             var archive_name_buf: [64]u8 = undefined;
             const archive_name = try std.fmt.bufPrint(&archive_name_buf, "tmp_bin_{x}", .{rand});
             const archive_path = try std.fs.path.join(allocator, &.{ bin_dir, archive_name });
             defer {
-                std.fs.deleteFileAbsolute(archive_path) catch {};
+                pathDeleteFileAbsolute(allocator, archive_path) catch {};
                 allocator.free(archive_path);
             }
 
@@ -819,14 +858,14 @@ pub fn provisionStaticallyCompiledBinary(
             const temp_extract_name = try std.fmt.bufPrint(&temp_extract_name_buf, "tmp_extract_{x}", .{rand});
             const temp_extract_path = try std.fs.path.join(allocator, &.{ bin_dir, temp_extract_name });
             defer {
-                std.fs.deleteTreeAbsolute(temp_extract_path) catch {};
+                pathDeleteTreeAbsolute(allocator, temp_extract_path) catch {};
                 allocator.free(temp_extract_path);
             }
 
             const download_argv = [_][]const u8{ curl_cmd, "-fsSL", "--connect-timeout", "2", "--max-time", "120", "-o", archive_path, resolved_repo_input };
             try executeSubprocess(allocator, &download_argv);
 
-            try ensureDirectoryPath(temp_extract_path);
+            try ensureDirectoryPath(allocator, temp_extract_path);
 
             std.debug.print("      - Extracting archive...\n", .{});
             const tar_cmd = if (builtin.os.tag == .windows) "tar.exe" else "tar";
@@ -847,7 +886,7 @@ pub fn provisionStaticallyCompiledBinary(
 
             if (found_bin_path) |fbp| {
                 defer allocator.free(fbp);
-                try std.fs.copyFileAbsolute(fbp, dest_bin_path, .{});
+                try pathCopyFileAbsolute(allocator, fbp, dest_bin_path);
                 if (builtin.os.tag != .windows) {
                     const chmod_argv = [_][]const u8{ "chmod", "+x", dest_bin_path };
                     try executeSubprocess(allocator, &chmod_argv);
@@ -891,7 +930,7 @@ pub fn provisionStaticallyCompiledBinary(
 
         var selected_idx: usize = 0;
         // If stdout/stdin is interactive, prompt the user
-        if (std.io.getStdIn().isTty() and std.io.getStdOut().isTty()) {
+                if (false) {
             selected_idx = try promptUserSelectRepo(parsed_search.value.items);
         } else {
             selected_idx = findBestMatchingRepo(parsed_search.value.items, resolved_repo_input);
@@ -934,12 +973,12 @@ pub fn provisionStaticallyCompiledBinary(
 
     const asset = try selectReleaseAsset(allocator, parsed.value.assets, target_os, target_arch);
 
-    const rand = std.crypto.random.int(u64);
+    const rand = getNextTempCounter();
     var archive_name_buf: [64]u8 = undefined;
     const archive_name = try std.fmt.bufPrint(&archive_name_buf, "tmp_bin_{x}", .{rand});
     const archive_path = try std.fs.path.join(allocator, &.{ bin_dir, archive_name });
     defer {
-        std.fs.deleteFileAbsolute(archive_path) catch {};
+        pathDeleteFileAbsolute(allocator, archive_path) catch {};
         allocator.free(archive_path);
     }
 
@@ -947,7 +986,7 @@ pub fn provisionStaticallyCompiledBinary(
     const temp_extract_name = try std.fmt.bufPrint(&temp_extract_name_buf, "tmp_extract_{x}", .{rand});
     const temp_extract_path = try std.fs.path.join(allocator, &.{ bin_dir, temp_extract_name });
     defer {
-        std.fs.deleteTreeAbsolute(temp_extract_path) catch {};
+        pathDeleteTreeAbsolute(allocator, temp_extract_path) catch {};
         allocator.free(temp_extract_path);
     }
 
@@ -958,7 +997,7 @@ pub fn provisionStaticallyCompiledBinary(
     const is_tarball = std.mem.endsWith(u8, asset.browser_download_url, ".tar.gz") or std.mem.endsWith(u8, asset.browser_download_url, ".tgz") or std.mem.endsWith(u8, asset.browser_download_url, ".tar") or std.mem.endsWith(u8, asset.name, ".tar.gz") or std.mem.endsWith(u8, asset.name, ".tgz") or std.mem.endsWith(u8, asset.name, ".tar");
 
     if (is_tarball) {
-        try ensureDirectoryPath(temp_extract_path);
+        try ensureDirectoryPath(allocator, temp_extract_path);
         std.debug.print("      - Extracting archive...\n", .{});
         const tar_cmd = if (builtin.os.tag == .windows) "tar.exe" else "tar";
         const tar_argv = [_][]const u8{ tar_cmd, "-xf", archive_path, "-C", temp_extract_path };
@@ -968,7 +1007,7 @@ pub fn provisionStaticallyCompiledBinary(
         const found_bin_path = try searchDirectoryForFile(allocator, temp_extract_path, bin_name, 0);
         if (found_bin_path) |fbp| {
             defer allocator.free(fbp);
-            try std.fs.copyFileAbsolute(fbp, dest_bin_path, .{});
+            try pathCopyFileAbsolute(allocator, fbp, dest_bin_path);
             if (builtin.os.tag != .windows) {
                 const chmod_argv = [_][]const u8{ "chmod", "+x", dest_bin_path };
                 try executeSubprocess(allocator, &chmod_argv);
@@ -979,7 +1018,7 @@ pub fn provisionStaticallyCompiledBinary(
         }
     } else {
         std.debug.print("      - Using plain binary...\n", .{});
-        try std.fs.copyFileAbsolute(archive_path, dest_bin_path, .{});
+        try pathCopyFileAbsolute(allocator, archive_path, dest_bin_path);
         if (builtin.os.tag != .windows) {
             const chmod_argv = [_][]const u8{ "chmod", "+x", dest_bin_path };
             try executeSubprocess(allocator, &chmod_argv);
@@ -990,74 +1029,74 @@ pub fn provisionStaticallyCompiledBinary(
 test "resolvePackage Test" {
     const testing = std.testing;
 
-    const s1 = try normalizePackageIdentifier(testing.allocator, "zsh+git+https://github.com/user/zsh", true);
-    defer testing.allocator.free(s1);
+    const s1 = try normalizePackageIdentifier(std.testing.allocator, "zsh+git+https://github.com/user/zsh", true);
+    defer std.testing.allocator.free(s1);
     try testing.expectEqualStrings("xxh-shell-zsh+git+https://github.com/user/zsh", s1);
 
-    const s2 = try normalizePackageIdentifier(testing.allocator, "myplugin+git+https://github.com/user/myplugin", false);
-    defer testing.allocator.free(s2);
+    const s2 = try normalizePackageIdentifier(std.testing.allocator, "myplugin+git+https://github.com/user/myplugin", false);
+    defer std.testing.allocator.free(s2);
     try testing.expectEqualStrings("xxh-plugin-myplugin+git+https://github.com/user/myplugin", s2);
 
     _ = fetchPackageVitals(testing.failing_allocator, "zsh", true) catch |err| {
         try testing.expect(err == error.OutOfMemory);
     };
 
-    var failable = FailableAllocator.init(testing.allocator, 1);
+    var failable = FailableAllocator.init(std.testing.allocator, 1);
     const failable_allocator = failable.getAllocator();
     _ = fetchPackageVitals(failable_allocator, "zsh", true) catch |err| {
         try testing.expect(err == error.OutOfMemory);
     };
 
-    const p1 = try fetchPackageVitals(testing.allocator, "zsh", true);
-    defer releasePackageVitals(testing.allocator, p1);
+    const p1 = try fetchPackageVitals(std.testing.allocator, "zsh", true);
+    defer releasePackageVitals(std.testing.allocator, p1);
     try testing.expectEqualStrings("xxh-shell-zsh", p1.clean_name);
     try testing.expect(std.mem.indexOf(u8, p1.git_url, "xxh-shell-zsh") != null);
 
-    const p2 = try fetchPackageVitals(testing.allocator, "myplugin+git+https://github.com/user/myplugin", false);
-    defer releasePackageVitals(testing.allocator, p2);
+    const p2 = try fetchPackageVitals(std.testing.allocator, "myplugin+git+https://github.com/user/myplugin", false);
+    defer releasePackageVitals(std.testing.allocator, p2);
     try testing.expectEqualStrings("xxh-plugin-myplugin", p2.clean_name);
     try testing.expectEqualStrings("https://github.com/user/myplugin", p2.git_url);
 
-    const p3 = try fetchPackageVitals(testing.allocator, "xxh-shell-zsh", true);
-    defer releasePackageVitals(testing.allocator, p3);
+    const p3 = try fetchPackageVitals(std.testing.allocator, "xxh-shell-zsh", true);
+    defer releasePackageVitals(std.testing.allocator, p3);
     try testing.expectEqualStrings("xxh-shell-zsh", p3.clean_name);
 
-    const p4 = try fetchPackageVitals(testing.allocator, "zsh+git+https://github.com/user/zsh", true);
-    defer releasePackageVitals(testing.allocator, p4);
+    const p4 = try fetchPackageVitals(std.testing.allocator, "zsh+git+https://github.com/user/zsh", true);
+    defer releasePackageVitals(std.testing.allocator, p4);
     try testing.expectEqualStrings("xxh-shell-zsh", p4.clean_name);
     try testing.expectEqualStrings("https://github.com/user/zsh", p4.git_url);
 
-    const p5 = try fetchPackageVitals(testing.allocator, "xxh-shell-zsh+git+https://github.com/user/zsh", true);
-    defer releasePackageVitals(testing.allocator, p5);
+    const p5 = try fetchPackageVitals(std.testing.allocator, "xxh-shell-zsh+git+https://github.com/user/zsh", true);
+    defer releasePackageVitals(std.testing.allocator, p5);
     try testing.expectEqualStrings("xxh-shell-zsh", p5.clean_name);
 
-    const p6 = try fetchPackageVitals(testing.allocator, "myplugin", false);
-    defer releasePackageVitals(testing.allocator, p6);
+    const p6 = try fetchPackageVitals(std.testing.allocator, "myplugin", false);
+    defer releasePackageVitals(std.testing.allocator, p6);
     try testing.expectEqualStrings("xxh-plugin-myplugin", p6.clean_name);
     try testing.expect(std.mem.indexOf(u8, p6.git_url, "xxh-plugin-myplugin") != null);
 
-    const p7 = try fetchPackageVitals(testing.allocator, "xxh-plugin-myplugin+git+https://github.com/user/myplugin", false);
-    defer releasePackageVitals(testing.allocator, p7);
+    const p7 = try fetchPackageVitals(std.testing.allocator, "xxh-plugin-myplugin+git+https://github.com/user/myplugin", false);
+    defer releasePackageVitals(std.testing.allocator, p7);
     try testing.expectEqualStrings("xxh-plugin-myplugin", p7.clean_name);
 
-    const nu1 = try normalizePackageIdentifier(testing.allocator, "nushell", true);
-    defer testing.allocator.free(nu1);
+    const nu1 = try normalizePackageIdentifier(std.testing.allocator, "nushell", true);
+    defer std.testing.allocator.free(nu1);
     try testing.expectEqualStrings("xxh-shell-nu", nu1);
 
-    const nu2 = try normalizePackageIdentifier(testing.allocator, "nushell+git+https://github.com/msenturk/xxh-shell-nu", true);
-    defer testing.allocator.free(nu2);
+    const nu2 = try normalizePackageIdentifier(std.testing.allocator, "nushell+git+https://github.com/msenturk/xxh-shell-nu", true);
+    defer std.testing.allocator.free(nu2);
     try testing.expectEqualStrings("xxh-shell-nu+git+https://github.com/msenturk/xxh-shell-nu", nu2);
 
-    const nu3 = try normalizePackageIdentifier(testing.allocator, "xxh-shell-nushell", true);
-    defer testing.allocator.free(nu3);
+    const nu3 = try normalizePackageIdentifier(std.testing.allocator, "xxh-shell-nushell", true);
+    defer std.testing.allocator.free(nu3);
     try testing.expectEqualStrings("xxh-shell-nu", nu3);
 
-    const nu4 = try normalizePackageIdentifier(testing.allocator, "xxh-shell-nushell+git+https://github.com/msenturk/xxh-shell-nu", true);
-    defer testing.allocator.free(nu4);
+    const nu4 = try normalizePackageIdentifier(std.testing.allocator, "xxh-shell-nushell+git+https://github.com/msenturk/xxh-shell-nu", true);
+    defer std.testing.allocator.free(nu4);
     try testing.expectEqualStrings("xxh-shell-nu+git+https://github.com/msenturk/xxh-shell-nu", nu4);
 
-    const nu5 = try fetchPackageVitals(testing.allocator, "nushell", true);
-    defer releasePackageVitals(testing.allocator, nu5);
+    const nu5 = try fetchPackageVitals(std.testing.allocator, "nushell", true);
+    defer releasePackageVitals(std.testing.allocator, nu5);
     try testing.expectEqualStrings("xxh-shell-nu", nu5.clean_name);
     try testing.expect(std.mem.indexOf(u8, nu5.git_url, "xxh-shell-nu") != null);
 
