@@ -432,9 +432,9 @@ pub fn provisionStaticallyCompiledTmux(allocator: std.mem.Allocator, install_for
 pub fn provisionNushellPlugins(
     allocator: std.mem.Allocator,
     package_names: []const []const u8,
-    install_force: bool,
+    _: bool,
     local_xxh_home: ?[]const u8,
-    target_os: []const u8,
+    _: []const u8,
     target_arch: []const u8,
 ) !void {
     var base_dir: []const u8 = undefined;
@@ -509,17 +509,16 @@ pub fn obtainAndCachePackage(allocator: std.mem.Allocator, pkg: DownloaderManife
             std.debug.print("      - Downloading {s} (git)...\n", .{pkg.clean_name});
             const argv = [_][]const u8{ "git", "clone", "--depth=1", pkg.git_url, target_dir };
             executeSubprocess(allocator, &argv) catch |err| {
-                    if (err == error.CommandFailed) {
-                        std.debug.print("      - Failed to download from git. Trying official xxh fallback repository...\n", .{});
-                        const fallback_url = try std.fmt.allocPrint(allocator, "https://github.com/xxh/{s}", .{pkg.clean_name});
-                        defer allocator.free(fallback_url);
-                        const fallback_argv = [_][]const u8{ "git", "clone", "--depth=1", fallback_url, target_dir };
-                        try executeSubprocess(allocator, &fallback_argv);
-                    } else {
-                        return err;
-                    }
-                };
-            }
+                if (err == error.CommandFailed) {
+                    std.debug.print("      - Failed to download from git. Trying official xxh fallback repository...\n", .{});
+                    const fallback_url = try std.fmt.allocPrint(allocator, "https://github.com/xxh/{s}", .{pkg.clean_name});
+                    defer allocator.free(fallback_url);
+                    const fallback_argv = [_][]const u8{ "git", "clone", "--depth=1", fallback_url, target_dir };
+                    try executeSubprocess(allocator, &fallback_argv);
+                } else {
+                    return err;
+                }
+            };
         }
     }
 
