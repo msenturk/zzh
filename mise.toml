@@ -1,5 +1,3 @@
-[tools]
-zig = "0.16.0"
 
 [tasks.build]
 description = "Build zzh in debug mode"
@@ -32,3 +30,6 @@ run = "zig build test"
 [tasks.clean]
 description = "Remove build artifacts and cache"
 run = "rm -rf zig-out .zig-cache dist"
+
+[tools]
+zig = "0.16.0"
