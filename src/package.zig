@@ -192,7 +192,7 @@ pub fn executeSubprocess(allocator: std.mem.Allocator, command_argv: []const []c
 /// Downloads and extracts the official statically compiled Nushell plugins.
 /// We target musl releases because Nushell plugins compiled with musl run seamlessly on almost
 /// all Linux distros, including minimal environments (like Alpine) that lack glibc out of the box.
-fn fetchStaticallyCompiledNushellPlugin(allocator: std.mem.Allocator, plugin_name: []const u8, target_dir: []const u8) !void {
+fn fetchStaticallyCompiledNushellPlugin(allocator: std.mem.Allocator, plugin_name: []const u8, target_dir: []const u8, target_arch: []const u8) !void {
     const NU_VERSION = "0.94.2";
     const tarball_name = "nu_plugin_download.tar.gz";
 
@@ -201,11 +201,12 @@ fn fetchStaticallyCompiledNushellPlugin(allocator: std.mem.Allocator, plugin_nam
 
     try ensureDirectoryPath(allocator, target_dir);
 
-    const arch_str = switch (@import("builtin").cpu.arch) {
-        .x86_64 => "x86_64",
-        .aarch64 => "aarch64",
-        else => return error.UnsupportedArchitecture,
-    };
+    const arch_str = if (std.mem.eql(u8, target_arch, "x86_64"))
+        "x86_64"
+    else if (std.mem.eql(u8, target_arch, "aarch64"))
+        "aarch64"
+    else
+        return error.UnsupportedArchitecture;
 
     const download_url = try std.fmt.allocPrint(allocator, "https://github.com/nushell/nushell/releases/download/{s}/nu-{s}-{s}-unknown-linux-musl.tar.gz", .{ NU_VERSION, NU_VERSION, arch_str });
     defer allocator.free(download_url);
@@ -426,6 +427,41 @@ pub fn provisionStaticallyCompiledTmux(allocator: std.mem.Allocator, install_for
     return tmux_path;
 }
 
+/// Provisions official pre-compiled Nushell plugins for the target architecture.
+/// Since Nushell plugins are architecture-specific, this must be called after the remote architecture is detected.
+pub fn provisionNushellPlugins(
+    allocator: std.mem.Allocator,
+    package_names: []const []const u8,
+    install_force: bool,
+    local_xxh_home: ?[]const u8,
+    target_os: []const u8,
+    target_arch: []const u8,
+) !void {
+    var base_dir: []const u8 = undefined;
+    if (local_xxh_home) |lh| {
+        base_dir = try config.expandUserPath(allocator, lh);
+    } else {
+        const home = config.discoverUserHomeDirectory(allocator) orelse return error.HomeDirNotFound;
+        defer allocator.free(home);
+        base_dir = try std.fs.path.join(allocator, &.{ home, ".zzh" });
+    }
+    defer allocator.free(base_dir);
+
+    for (package_names) |name| {
+        const pkg = try fetchPackageVitals(allocator, name, false);
+        defer releasePackageVitals(allocator, pkg);
+
+        if (std.mem.startsWith(u8, pkg.clean_name, "xxh-plugin-nu-")) {
+            const plugin_suffix = pkg.clean_name["xxh-plugin-nu-".len..];
+            const target_dir = try std.fs.path.join(allocator, &.{ base_dir, ".zzh", "plugins", pkg.clean_name });
+            defer allocator.free(target_dir);
+
+            std.debug.print("      - Provisioning official Nushell plugin '{s}' for {s}...\n", .{ plugin_suffix, target_arch });
+            try fetchStaticallyCompiledNushellPlugin(allocator, plugin_suffix, target_dir, target_arch);
+        }
+    }
+}
+
 /// Checks if a package is cached locally; if not, git clones/downloads it from remote.
 pub fn obtainAndCachePackage(allocator: std.mem.Allocator, pkg: DownloaderManifest, is_shell: bool, install_force: bool, local_xxh_home: ?[]const u8) ![]const u8 {
     var base_dir: []const u8 = undefined;
@@ -458,26 +494,21 @@ pub fn obtainAndCachePackage(allocator: std.mem.Allocator, pkg: DownloaderManife
         defer allocator.free(parent_dir);
         try ensureDirectoryPath(allocator, parent_dir);
 
-        if (!is_shell and std.mem.startsWith(u8, pkg.clean_name, "xxh-plugin-nu-")) {
-            const plugin_suffix = pkg.clean_name["xxh-plugin-nu-".len..];
-            std.debug.print("      - Downloading official Nushell plugin '{s}'...\n", .{plugin_suffix});
-            try fetchStaticallyCompiledNushellPlugin(allocator, plugin_suffix, target_dir);
+        if (std.mem.endsWith(u8, pkg.git_url, ".tar.gz")) {
+            downloadAndExtractTarball(allocator, pkg.clean_name, pkg.git_url, target_dir) catch |err| {
+                if (err == error.HttpDownloadFailed) {
+                    std.debug.print("      - Failed to download tarball. Trying official xxh fallback repository...\n", .{});
+                    const fallback_url = try std.fmt.allocPrint(allocator, "https://github.com/xxh/{s}/releases/latest/download/{s}.tar.gz", .{ pkg.clean_name, pkg.clean_name });
+                    defer allocator.free(fallback_url);
+                    try downloadAndExtractTarball(allocator, pkg.clean_name, fallback_url, target_dir);
+                } else {
+                    return err;
+                }
+            };
         } else {
-            if (std.mem.endsWith(u8, pkg.git_url, ".tar.gz")) {
-                downloadAndExtractTarball(allocator, pkg.clean_name, pkg.git_url, target_dir) catch |err| {
-                    if (err == error.HttpDownloadFailed) {
-                        std.debug.print("      - Failed to download tarball. Trying official xxh fallback repository...\n", .{});
-                        const fallback_url = try std.fmt.allocPrint(allocator, "https://github.com/xxh/{s}/releases/latest/download/{s}.tar.gz", .{ pkg.clean_name, pkg.clean_name });
-                        defer allocator.free(fallback_url);
-                        try downloadAndExtractTarball(allocator, pkg.clean_name, fallback_url, target_dir);
-                    } else {
-                        return err;
-                    }
-                };
-            } else {
-                std.debug.print("      - Downloading {s} (git)...\n", .{pkg.clean_name});
-                const argv = [_][]const u8{ "git", "clone", "--depth=1", pkg.git_url, target_dir };
-                executeSubprocess(allocator, &argv) catch |err| {
+            std.debug.print("      - Downloading {s} (git)...\n", .{pkg.clean_name});
+            const argv = [_][]const u8{ "git", "clone", "--depth=1", pkg.git_url, target_dir };
+            executeSubprocess(allocator, &argv) catch |err| {
                     if (err == error.CommandFailed) {
                         std.debug.print("      - Failed to download from git. Trying official xxh fallback repository...\n", .{});
                         const fallback_url = try std.fmt.allocPrint(allocator, "https://github.com/xxh/{s}", .{pkg.clean_name});

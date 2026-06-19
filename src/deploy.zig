@@ -829,6 +829,15 @@ pub fn deployAndConnect(
 
         target_os = try normalizeOs(allocator, os_line orelse "linux");
         target_arch = try normalizeArch(allocator, arch_line orelse "x86_64");
+
+        try package.provisionNushellPlugins(
+            allocator,
+            zzh_args.plugins.items,
+            zzh_args.install_force,
+            zzh_args.local_zzh_home,
+            target_os.?,
+            target_arch.?,
+        );
     }
 
     var send_payload = false;

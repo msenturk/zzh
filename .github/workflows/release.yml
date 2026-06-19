@@ -1,89 +1,94 @@
 name: Release
-
 on:
   push:
     tags:
       - 'v*'
-
 permissions:
   contents: write
-
 jobs:
-  build-release:
-    name: Build & Release
+  build:
+    name: Build ${{ matrix.target }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-linux-musl
+          - aarch64-linux-musl
+          - x86_64-linux
+          - aarch64-linux
+          - x86_64-macos
+          - aarch64-macos
+          - x86_64-windows
+          - aarch64-windows
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
-
       - name: Setup Zig
         uses: mlugg/setup-zig@v1
         with:
           version: 0.14.0
-
-      - name: Build and Package Release Assets
-        shell: bash
-        run: |
-          VERSION="${{ github.ref_name }}"
-          TARGETS=(
-            "x86_64-linux-musl"
-            "aarch64-linux-musl"
-            "x86_64-linux"
-            "aarch64-linux"
-            "x86_64-macos"
-            "aarch64-macos"
-            "x86_64-windows"
-            "aarch64-windows"
-          )
-          
-          for TARGET in "${TARGETS[@]}"; do
-            echo "Building for $TARGET..."
-            zig build -Doptimize=ReleaseSmall -Dtarget="$TARGET"
-            
-            if [[ "$TARGET" == *"windows"* ]]; then
-              BIN_NAME="zzh.exe"
-              ASSET_NAME="zzh-${VERSION}-${TARGET}.zip"
-              cd zig-out/bin
-              zip -r "../../${ASSET_NAME}" "${BIN_NAME}"
-              cd ../..
-            else
-              BIN_NAME="zzh"
-              ASSET_NAME="zzh-${VERSION}-${TARGET}.tar.gz"
-              cd zig-out/bin
-              tar -czf "../../${ASSET_NAME}" "${BIN_NAME}"
-              cd ../..
-            fi
-            
-            rm -rf zig-out
-          done
-
+      - name: Build
+        run: zig build -Doptimize=ReleaseSmall -Dtarget=${{ matrix.target }}
+      - name: Package (unix)
+        if: ${{ !contains(matrix.target, 'windows') }}
+        run: tar -czf zzh-${{ github.ref_name }}-${{ matrix.target }}.tar.gz -C zig-out/bin zzh
+      - name: Package (windows)
+        if: ${{ contains(matrix.target, 'windows') }}
+        run: cd zig-out/bin && zip -r ../../zzh-${{ github.ref_name }}-${{ matrix.target }}.zip zzh.exe
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: zzh-${{ github.ref_name }}-${{ matrix.target }}.*
+  packages:
+    name: Package Shells & Plugins
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
       - name: Package Shells and Plugins
         shell: bash
         run: |
           mkdir -p release-packages
-          
-          # Package all shells
           for dir in shells/*/; do
             if [ -d "$dir" ]; then
               base=$(basename "$dir")
               tar -czf "release-packages/${base}.tar.gz" -C shells "$base"
             fi
           done
-          
-          # Package all plugins
           for dir in plugins/*/; do
             if [ -d "$dir" ]; then
               base=$(basename "$dir")
               tar -czf "release-packages/${base}.tar.gz" -C plugins "$base"
             fi
           done
-
+      - name: Upload packages artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: release-packages/
+  release:
+    name: Create Release
+    needs: [build, packages]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          find . -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec sha256sum {} \; | sort > checksums.txt
+          cat checksums.txt
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            zzh-${{ github.ref_name }}-*.tar.gz
-            zzh-${{ github.ref_name }}-*.zip
-            release-packages/*.tar.gz
+            artifacts/zzh-*-${{ github.ref_name }}-*.tar.gz
+            artifacts/zzh-*-${{ github.ref_name }}-*.zip
+            artifacts/release-packages/*.tar.gz
+            artifacts/checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
